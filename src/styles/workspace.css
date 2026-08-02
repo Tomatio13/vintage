@@ -1040,6 +1040,94 @@
   font: calc((8px) * var(--app-font-scale))/1.45 var(--mono);
 }
 
+.keybindings-row[data-conflict="true"] strong {
+  color: var(--danger, var(--signal-strong));
+}
+
+.keybindings-conflict {
+  color: var(--danger, var(--signal-strong));
+}
+
+.keybindings-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.keybindings-chord {
+  min-width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font: calc((9px) * var(--app-font-scale)) var(--mono);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.keybindings-chord[data-recording="true"] {
+  border-color: color-mix(in srgb, var(--signal) 50%, var(--line-strong));
+  background: var(--signal-soft);
+  color: var(--signal-strong);
+}
+
+.keybindings-control > button {
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: calc((9px) * var(--app-font-scale));
+  line-height: 1;
+  transition: background 130ms ease, border-color 130ms ease, color 130ms ease, opacity 130ms ease;
+}
+
+.keybindings-control > button:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--signal) 34%, var(--line-strong));
+  background: var(--signal-soft);
+  color: var(--signal-strong);
+}
+
+.keybindings-control > button.recording {
+  border-color: color-mix(in srgb, var(--signal) 50%, var(--line-strong));
+  background: var(--signal-soft);
+  color: var(--signal-strong);
+}
+
+.keybindings-control > button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.settings-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.keybindings-reset {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: calc((9px) * var(--app-font-scale));
+  line-height: 1;
+  transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
+}
+
+.keybindings-reset:hover {
+  border-color: color-mix(in srgb, var(--signal) 34%, var(--line-strong));
+  background: var(--signal-soft);
+  color: var(--signal-strong);
+}
+
 .settings-account-action {
   min-height: 72px;
   padding: 0 18px;

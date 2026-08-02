@@ -5,6 +5,7 @@ import "./App.css";
 import "./styles/workspace.css";
 import { useAppearance } from "./appearance";
 import { useFontScale } from "./fontScale";
+import { useKeybindings } from "./settings/keybindings.ts";
 import { host } from "./host";
 import type { AppUpdateInfo, AppUpdateProgress } from "./host/types";
 import {
@@ -25,6 +26,7 @@ export function App() {
     setPreference: setAppearance,
   } = useAppearance();
   const { fontScale, setFontScale } = useFontScale();
+  const { bindings, bind, resetAll } = useKeybindings();
   const overlayTitlebar = usesOverlayTitlebar();
   const [activeView, setActiveView] = useState<AppView>("session");
   const [activeSettingsSection, setActiveSettingsSection] =
@@ -103,10 +105,12 @@ export function App() {
     () => (
       <WorkspaceApp
         appearance={resolvedAppearance}
+        active={activeView === "session"}
+        bindings={bindings}
         onOpenSettings={() => openSettings("application")}
       />
     ),
-    [resolvedAppearance],
+    [resolvedAppearance, activeView, bindings],
   );
 
   return (
@@ -134,6 +138,7 @@ export function App() {
               section={activeSettingsSection}
               appearance={appearance}
               fontScale={fontScale}
+              bindings={bindings}
               appVersion={appVersion}
               update={appUpdate}
               updatePhase={updatePhase}
@@ -143,6 +148,8 @@ export function App() {
               onCheckForUpdates={checkForUpdates}
               onAppearanceChange={setAppearance}
               onFontScaleChange={setFontScale}
+              onBindKey={bind}
+              onResetKeybindings={resetAll}
               onInstallUpdate={installUpdate}
             />
           </main>

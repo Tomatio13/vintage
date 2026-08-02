@@ -98,6 +98,7 @@ export function TerminalSurface({
   workingDirectory,
   paneLaunch,
   restartToken,
+  focusRequest,
   onInfoChange,
   onStatusChange,
   onScreenState,
@@ -108,6 +109,8 @@ export function TerminalSurface({
   workingDirectory: string | null;
   paneLaunch?: PaneLaunchRequest | null;
   restartToken: number;
+  /** Bumped by the owner when keyboard selection should move focus here. */
+  focusRequest?: number;
   onInfoChange: (info: TerminalInfo | null) => void;
   onStatusChange: (status: TerminalStatus, message?: string) => void;
   /** Live bottom-buffer screen state, debounced ~120ms after output. */
@@ -153,6 +156,18 @@ export function TerminalSurface({
     );
     return () => window.cancelAnimationFrame(animationFrame);
   }, [active, panelOpen, renderReady]);
+
+  // A bump in focusRequest means keyboard selection moved onto this pane;
+  // reclaim xterm focus once the surface is ready so subsequent keystrokes
+  // reach this PTY instead of the one that was focused before.
+  useEffect(() => {
+    if (focusRequest === undefined || focusRequest === 0) return;
+    if (!active || !panelOpen || !renderReady) return;
+    const animationFrame = window.requestAnimationFrame(() =>
+      terminalInstance.current?.focus(),
+    );
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [focusRequest, active, panelOpen, renderReady]);
 
   useEffect(() => {
     if (terminalInstance.current)

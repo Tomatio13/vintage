@@ -7,7 +7,7 @@
  * restart menu in Phase 6, when agent launch definitions land.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ResolvedAppearance } from "../appearance";
 import {
   TerminalSurface,
@@ -22,6 +22,8 @@ export interface PaneTerminalProps {
   workspaceId: string;
   runtime: PaneRuntime;
   active: boolean;
+  /** This pane is the selected pane of the active tab; it owns xterm focus. */
+  selected: boolean;
   appearance: ResolvedAppearance;
   onStart: (paneId: string) => void;
   onClose: (paneId: string) => void;
@@ -50,6 +52,7 @@ export function PaneTerminal({
   workspaceId,
   runtime,
   active,
+  selected,
   appearance,
   onStart,
   onClose,
@@ -61,6 +64,18 @@ export function PaneTerminal({
   const live =
     runtime.ptyState === "starting" || runtime.ptyState === "running";
   const shellLabel = info?.shell.label ?? pane.shellId;
+
+  // Focus follows keyboard selection: when this pane becomes the selected one
+  // (via shortcuts or sidebar), move xterm focus to it. The initial mount of a
+  // selected pane is skipped — the terminal surface focuses itself on start.
+  const prevSelected = useRef(selected);
+  const [focusRequest, setFocusRequest] = useState(0);
+  useEffect(() => {
+    if (selected && !prevSelected.current) {
+      setFocusRequest((current) => current + 1);
+    }
+    prevSelected.current = selected;
+  }, [selected]);
 
   return (
     <>
@@ -109,6 +124,7 @@ export function PaneTerminal({
             panelOpen
             workingDirectory={null}
             restartToken={runtime.generation}
+            focusRequest={focusRequest}
             paneLaunch={{
               terminalId: runtime.terminalId,
               paneId: pane.id,

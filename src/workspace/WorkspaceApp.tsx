@@ -19,6 +19,11 @@ import {
 } from "./agentState.ts";
 import { listPaneIds, type SplitPath } from "./paneLayout.ts";
 import {
+  navigatePanes,
+  navigateTabs,
+  navigateWorkspaces,
+} from "./navigation.ts";
+import {
   paneRuntimeOrStopped,
   removePaneRuntime,
   setPanePtyState,
@@ -26,6 +31,11 @@ import {
   type PaneRuntimeMap,
 } from "./paneRuntime.ts";
 import { PaneTerminal } from "./PaneTerminal.tsx";
+import {
+  matchShortcut,
+  type ShortcutAction,
+  type ShortcutBinding,
+} from "./shortcuts.ts";
 import { SplitPaneView } from "./SplitPaneView.tsx";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel.tsx";
@@ -41,9 +51,15 @@ import "./workspace.css";
 
 export function WorkspaceApp({
   appearance,
+  active,
+  bindings,
   onOpenSettings,
 }: {
   appearance: ResolvedAppearance;
+  /** Session view is visible; shortcuts are disabled on the settings screen. */
+  active: boolean;
+  /** User-customizable shortcut bindings; re-registered on change. */
+  bindings: ShortcutBinding[];
   onOpenSettings: () => void;
 }) {
   const {
@@ -194,6 +210,84 @@ export function WorkspaceApp({
     },
     [selectedWorkspace],
   );
+
+  // Keyboard navigation across the workspace → tab → pane hierarchy. The
+  // keydown listener is capture-phase so it swallows chords before xterm can
+  // forward them to the PTY.
+  const handleShortcutAction = useCallback(
+    (action: ShortcutAction) => {
+      const current = selectedWorkspace;
+      if (!current) return;
+
+      if (action === "tabNext" || action === "tabPrevious") {
+        const tabId = navigateTabs(current, action === "tabNext" ? 1 : -1);
+        if (tabId) selectTab(current.id, tabId);
+        return;
+      }
+
+      const tab = current.tabs.find(
+        (candidate) => candidate.id === current.selectedTabId,
+      );
+      if (!tab) return;
+
+      if (action === "paneNext" || action === "panePrevious") {
+        const paneId = navigatePanes(tab, action === "paneNext" ? 1 : -1);
+        if (paneId) {
+          // Viewing a pane acknowledges any pending done badge, matching the
+          // sidebar click handler.
+          setDonePending((pending) =>
+            pending[paneId] ? { ...pending, [paneId]: false } : pending,
+          );
+          selectPane(current.id, tab.id, paneId);
+        }
+        return;
+      }
+
+      if (action === "workspaceNext" || action === "workspacePrevious") {
+        const nextId = navigateWorkspaces(
+          workspaces,
+          current.id,
+          action === "workspaceNext" ? 1 : -1,
+        );
+        if (nextId) setSelectedWorkspaceId(nextId);
+      }
+    },
+    [selectedWorkspace, workspaces, selectTab, selectPane],
+  );
+
+  const handleShortcutActionRef = useRef(handleShortcutAction);
+  handleShortcutActionRef.current = handleShortcutAction;
+
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      // Skip while editing text outside a terminal (rename inputs, settings).
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, [contenteditable]") &&
+        !target.closest(".terminal-surface")
+      ) {
+        return;
+      }
+      const action = matchShortcut(
+        bindings,
+        {
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          shiftKey: event.shiftKey,
+          metaKey: event.metaKey,
+        },
+        event.code,
+      );
+      if (!action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleShortcutActionRef.current(action);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [active, bindings]);
 
   const handleActivityChange = useCallback(
     (paneId: string, activity: ReportedActivity) => {
@@ -368,6 +462,7 @@ export function WorkspaceApp({
           workspaceId={workspace.id}
           runtime={paneRuntimeOrStopped(runtimes, paneId)}
           active={active}
+          selected={active && tab.selectedPaneId === pane.id}
           appearance={appearance}
           onStart={handleStartPane}
           onClose={(id) => handleClosePane(workspace.id, tab.id, id)}
@@ -438,10 +533,7 @@ export function WorkspaceApp({
           <div className="ws-layout-alert" role="alert">
             <strong>Workspace removal failed.</strong> {workspaceActionError}
             <br />
-            <button
-              type="button"
-              onClick={() => setWorkspaceActionError(null)}
-            >
+            <button type="button" onClick={() => setWorkspaceActionError(null)}>
               Dismiss
             </button>
           </div>

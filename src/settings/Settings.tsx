@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { AppearancePreference } from "../appearance";
 import {
   DEFAULT_FONT_SCALE,
@@ -9,8 +10,16 @@ import {
 import type { AppUpdateInfo, AppUpdateProgress } from "../host/types";
 import type { AppUpdatePhase } from "../update/types";
 import { Icon } from "../ui/Icon";
+import {
+  formatShortcutKey,
+  SHORTCUT_ACTION_LABELS,
+  SHORTCUT_ACTIONS,
+  type ShortcutAction,
+  type ShortcutBinding,
+  type ShortcutKey,
+} from "../workspace/shortcuts.ts";
 
-export type SettingsSection = "application" | "appearance";
+export type SettingsSection = "application" | "appearance" | "keybindings";
 
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
@@ -26,6 +35,11 @@ const SETTINGS_SECTIONS: Array<{
     id: "appearance",
     label: "Appearance",
     description: "Theme and text size on this device",
+  },
+  {
+    id: "keybindings",
+    label: "Keybindings",
+    description: "Keyboard shortcuts for navigation",
   },
 ];
 
@@ -113,6 +127,7 @@ export function SettingsScreen({
   section,
   appearance,
   fontScale,
+  bindings,
   appVersion,
   update,
   updatePhase,
@@ -122,12 +137,15 @@ export function SettingsScreen({
   onCheckForUpdates,
   onAppearanceChange,
   onFontScaleChange,
+  onBindKey,
+  onResetKeybindings,
   onInstallUpdate,
 }: {
   overlayTitlebar: boolean;
   section: SettingsSection;
   appearance: AppearancePreference;
   fontScale: number;
+  bindings: ShortcutBinding[];
   appVersion: string | null;
   update: AppUpdateInfo | null;
   updatePhase: AppUpdatePhase;
@@ -137,6 +155,8 @@ export function SettingsScreen({
   onCheckForUpdates: () => void;
   onAppearanceChange: (appearance: AppearancePreference) => void;
   onFontScaleChange: (scale: number) => void;
+  onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
+  onResetKeybindings: () => void;
   onInstallUpdate: () => void;
 }) {
   const checkingForUpdates = updatePhase === "checking";
@@ -351,8 +371,149 @@ export function SettingsScreen({
               </div>
             </section>
           )}
+
+          {section === "keybindings" && (
+            <KeybindingsSection
+              bindings={bindings}
+              onBindKey={onBindKey}
+              onReset={onResetKeybindings}
+            />
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Keybindings settings: one row per shortcut action with a record button that
+ * captures the next chord. Duplicate chords are rejected with a warning.
+ */
+function KeybindingsSection({
+  bindings,
+  onBindKey,
+  onReset,
+}: {
+  bindings: ShortcutBinding[];
+  onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
+  onReset: () => void;
+}) {
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [conflict, setConflict] = useState<ShortcutAction | null>(null);
+  const onBindKeyRef = useRef(onBindKey);
+  onBindKeyRef.current = onBindKey;
+
+  const bindingByAction = new Map(
+    bindings.map((binding) => [binding.action, binding]),
+  );
+
+  // Capture the chord pressed while recording. Modifier-only chords (Ctrl,
+  // Alt, Shift on their own) are ignored; Escape cancels recording.
+  useEffect(() => {
+    if (recording === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setRecording(null);
+        return;
+      }
+      if (event.repeat) return;
+      if (
+        event.code === "ControlLeft" ||
+        event.code === "ControlRight" ||
+        event.code === "AltLeft" ||
+        event.code === "AltRight" ||
+        event.code === "ShiftLeft" ||
+        event.code === "ShiftRight" ||
+        event.code === "MetaLeft" ||
+        event.code === "MetaRight"
+      ) {
+        return;
+      }
+      if (event.metaKey) return;
+      const key: ShortcutKey = {
+        code: event.code,
+        ctrl: event.ctrlKey,
+        alt: event.altKey,
+        shift: event.shiftKey,
+      };
+      const accepted = onBindKeyRef.current(recording, key);
+      setConflict(accepted ? null : recording);
+      setRecording(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [recording]);
+
+  return (
+    <section
+      className="settings-card keybindings-settings-card"
+      aria-labelledby="keybindings-settings-title"
+    >
+      <header>
+        <div>
+          <h2 id="keybindings-settings-title">Keybindings</h2>
+          <p>Move between tabs, panes and workspaces from the keyboard.</p>
+        </div>
+      </header>
+
+      <div className="settings-list">
+        {SHORTCUT_ACTIONS.map((action) => {
+          const binding = bindingByAction.get(action);
+          const isRecording = recording === action;
+          const isConflict = conflict === action;
+          return (
+            <div
+              className="settings-row keybindings-row"
+              key={action}
+              data-conflict={isConflict}
+            >
+              <div>
+                <strong>{SHORTCUT_ACTION_LABELS[action]}</strong>
+                {isConflict ? (
+                  <small className="keybindings-conflict">
+                    That key is already assigned to another action.
+                  </small>
+                ) : (
+                  <small>
+                    Press the button, then the keys you want to assign.
+                  </small>
+                )}
+              </div>
+              <div className="keybindings-control">
+                <span
+                  className="keybindings-chord"
+                  data-recording={isRecording}
+                  aria-live="polite"
+                >
+                  {isRecording
+                    ? "Press a key…"
+                    : binding
+                      ? formatShortcutKey(binding)
+                      : ""}
+                </span>
+                <button
+                  type="button"
+                  className={isRecording ? "recording" : ""}
+                  disabled={recording !== null && !isRecording}
+                  onClick={() => {
+                    setConflict(null);
+                    setRecording(isRecording ? null : action);
+                  }}
+                >
+                  {isRecording ? "Cancel" : "Record"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <footer className="settings-card-footer">
+        <button type="button" className="keybindings-reset" onClick={onReset}>
+          Reset to defaults
+        </button>
+      </footer>
+    </section>
   );
 }
