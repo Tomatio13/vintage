@@ -23,9 +23,14 @@ pub(crate) const SHELL_ID_WINDOWS_PWSH: &str = "windows-pwsh";
 pub(crate) const SHELL_ID_WINDOWS_POWERSHELL: &str = "windows-powershell";
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const SHELL_ID_WINDOWS_GIT_BASH: &str = "windows-git-bash";
+// Unix-only ids; referenced by cross-platform tests, unused on Windows builds.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_DEFAULT: &str = "unix-default";
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_BASH: &str = "unix-bash";
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_ZSH: &str = "unix-zsh";
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_PWSH: &str = "unix-pwsh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -36,8 +41,12 @@ pub(crate) enum ShellKind {
     Pwsh,
     #[cfg_attr(not(windows), allow(dead_code))]
     GitBash,
+    // Constructed only by Unix detection; unused on Windows builds.
+    #[cfg_attr(windows, allow(dead_code))]
     Bash,
+    #[cfg_attr(windows, allow(dead_code))]
     Zsh,
+    #[cfg_attr(windows, allow(dead_code))]
     Posix,
     Custom,
 }
@@ -79,6 +88,7 @@ pub(crate) struct ShellDetectionInput<'a> {
     /// Reads an environment variable.
     pub(crate) env: &'a dyn Fn(&str) -> Option<String>,
     /// Login shell from the passwd database (Unix only).
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) passwd_shell: Option<String>,
 }
 
@@ -133,6 +143,7 @@ fn passwd_login_shell() -> Option<String> {
 }
 
 /// Pure passwd parser: returns the login shell field for `user`.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn passwd_login_shell_from(content: &str, user: &str) -> Option<String> {
     for line in content.lines() {
         let fields: Vec<&str> = line.split(':').collect();
@@ -290,6 +301,7 @@ fn git_root_has_git_exe(bash_path: &Path, exists: impl Fn(&Path) -> bool + Copy)
 // Unix detection
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn detect_unix_shells(input: &ShellDetectionInput<'_>) -> Vec<ShellDescriptor> {
     let mut shells = Vec::new();
 
@@ -353,6 +365,7 @@ pub(crate) fn detect_unix_shells(input: &ShellDetectionInput<'_>) -> Vec<ShellDe
     shells
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn unix_descriptor(
     id: &str,
     label: &str,
@@ -373,6 +386,7 @@ fn unix_descriptor(
     }
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn unix_kind_from_path(path: &Path) -> ShellKind {
     match path
         .file_name()
@@ -611,7 +625,7 @@ pub(crate) fn encode_powershell_script(script: &str) -> String {
 
 /// Decodes an `-EncodedCommand` payload back to script text (test helper and
 /// diagnostics only; never used to trust external input).
-#[cfg_attr(not(windows), allow(dead_code))]
+#[allow(dead_code)]
 pub(crate) fn decode_powershell_script(encoded: &str) -> Option<String> {
     let bytes = BASE64_STANDARD.decode(encoded).ok()?;
     if bytes.len() % 2 != 0 {
