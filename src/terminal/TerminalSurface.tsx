@@ -166,17 +166,23 @@ export function TerminalSurface({
       terminalInstance.current.options.theme = terminalTheme(appearance);
   }, [appearance]);
 
-  // Apply font family/size changes to a live terminal. xterm re-renders from
-  // these options automatically; no explicit resize is needed.
+  // Apply font family/size changes to a live terminal. Changing the family
+  // alters glyph widths, so the character grid must be re-measured: re-run fit
+  // after the option takes effect, otherwise xterm keeps the old cell size and
+  // the new font only shows once the pane is resized or remounted.
   useEffect(() => {
     const terminal = terminalInstance.current;
     if (!terminal) return;
+    let changed = false;
     if (terminal.options.fontFamily !== fontFamily) {
       terminal.options.fontFamily = fontFamily;
+      changed = true;
     }
     if (terminal.options.fontSize !== fontSize) {
       terminal.options.fontSize = fontSize;
+      changed = true;
     }
+    if (changed) requestFit.current?.();
   }, [fontFamily, fontSize]);
 
   useEffect(() => {
@@ -206,8 +212,11 @@ export function TerminalSurface({
       drawBoldTextInBrightColors: false,
       fontFamily,
       fontSize,
-      fontWeight: 430,
-      fontWeightBold: 650,
+      // Standard weights (400/700): static fonts like Cica and HackGen only
+      // ship Regular and Bold, so non-standard values (e.g. 430) make the
+      // browser fall back to the default font on Windows.
+      fontWeight: 400,
+      fontWeightBold: 700,
       letterSpacing: 0.15,
       lineHeight: 1.22,
       minimumContrastRatio: 4.5,
