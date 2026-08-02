@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FitAddon, init, Terminal } from "ghostty-web";
+import { FitAddon, Terminal } from "ghostty-web";
 import type { ResolvedAppearance } from "../appearance";
 import { host } from "../host";
 import type { AgentActivity, TerminalInfo } from "../host/types";
@@ -11,16 +11,6 @@ import {
 import type { PaneLaunchSpec } from "../workspace/types.ts";
 
 export type TerminalStatus = "starting" | "running" | "exited" | "error";
-
-/**
- * Shared WASM initialization for ghostty-web. Must resolve before any
- * Terminal is created; the promise is module-level so every pane waits on the
- * same load instead of re-booting WASM per terminal.
- */
-const ghosttyInit: Promise<void> = init().catch(() => {
-  // A failed WASM load surfaces as a terminal status error downstream; the
-  // pane still renders its stopped/error overlay.
-});
 
 /** Workspace-pane launch contract; when null the legacy path is used. */
 export interface PaneLaunchRequest {
@@ -124,7 +114,6 @@ export function TerminalSurface({
   const onScreenStateRef = useRef(onScreenState);
   onScreenStateRef.current = onScreenState;
   const requestFit = useRef<(() => void) | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
   const [renderReady, setRenderReady] = useState(false);
 
   useLayoutEffect(() => {
@@ -198,241 +187,227 @@ export function TerminalSurface({
     const target = container.current;
     if (!target) return;
 
-    void (async () => {
-      let active = true;
-      // ghostty-web must be initialized before any Terminal is created.
-      await ghosttyInit;
-      if (!active || !target.isConnected) return;
+    let active = true;
+    let started = false;
+    let startRequested = false;
+    const launchAtMount = paneLaunchRef.current;
+    const attachToExisting = launchAtMount?.attachToExisting ?? false;
+    let exited = false;
+    let resizeFrame = 0;
+    let resizeTimer = 0;
+    let screenTimer = 0;
+    const terminalId =
+      launchAtMount?.terminalId ?? `terminal-${crypto.randomUUID()}`;
+    const running = { current: false };
+    const unlisteners: Array<() => void> = [];
+    const encoder = new TextEncoder();
+    let writeQueue = Promise.resolve();
+    const terminal = new Terminal({
+      cursorBlink: true,
+      cursorStyle: "bar",
+      fontFamily,
+      fontSize,
+      scrollback: 5000,
+      theme: terminalTheme(appearance),
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(target);
+    terminalInstance.current = terminal;
 
-      let started = false;
-      let startRequested = false;
-      const launchAtMount = paneLaunchRef.current;
-      const attachToExisting = launchAtMount?.attachToExisting ?? false;
-      let exited = false;
-      let resizeFrame = 0;
-      let resizeTimer = 0;
-      let screenTimer = 0;
-      const terminalId =
-        launchAtMount?.terminalId ?? `terminal-${crypto.randomUUID()}`;
-      const running = { current: false };
-      const unlisteners: Array<() => void> = [];
-      const encoder = new TextEncoder();
-      let writeQueue = Promise.resolve();
-      const terminal = new Terminal({
-        cursorBlink: true,
-        cursorStyle: "bar",
-        fontFamily,
-        fontSize,
-        scrollback: 5000,
-        theme: terminalTheme(appearance),
-      });
-      const fitAddon = new FitAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.open(target);
-      terminalInstance.current = terminal;
-
-      const fit = () => {
-        window.cancelAnimationFrame(resizeFrame);
-        resizeFrame = window.requestAnimationFrame(() => {
-          if (!active || target.clientWidth === 0 || target.clientHeight === 0)
+    const fit = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        if (!active || target.clientWidth === 0 || target.clientHeight === 0)
+          return;
+        try {
+          const dimensions = fitAddon.proposeDimensions();
+          if (!dimensions || dimensions.cols < 20 || dimensions.rows < 2)
             return;
-          try {
-            const dimensions = fitAddon.proposeDimensions();
-            if (!dimensions || dimensions.cols < 20 || dimensions.rows < 2)
-              return;
-            if (
-              dimensions.cols !== terminal.cols ||
-              dimensions.rows !== terminal.rows
-            ) {
-              terminal.resize(dimensions.cols, dimensions.rows);
-            }
-            if (panelOpenRef.current) {
-              setRenderReady(true);
-              if (!startRequested) void start();
-            }
-          } catch {
-            // xterm can be between layout and disposal while the pane is closing.
+          if (
+            dimensions.cols !== terminal.cols ||
+            dimensions.rows !== terminal.rows
+          ) {
+            terminal.resize(dimensions.cols, dimensions.rows);
           }
-        });
-      };
-      const scheduleFit = () => {
-        window.clearTimeout(resizeTimer);
-        // The panel animates its width. Fitting on every animation frame makes
-        // interactive shells redraw their prompt into scrollback repeatedly.
-        resizeTimer = window.setTimeout(fit, 90);
-      };
-      requestFit.current = scheduleFit;
-
-      const enqueueInput = (data: number[]) => {
-        if (!running.current || data.length === 0) return;
-        writeQueue = writeQueue
-          .then(() => host.terminal.write(terminalId, data))
-          .catch(() => undefined);
-      };
-      const dataSubscription = terminal.onData((data) =>
-        enqueueInput(Array.from(encoder.encode(data))),
-      );
-      const resizeSubscription = terminal.onResize(({ cols, rows }) => {
-        if (!running.current) return;
-        void host.terminal
-          .resize(terminalId, cols, rows)
-          .catch(() => undefined);
+          if (panelOpenRef.current) {
+            setRenderReady(true);
+            if (!startRequested) void start();
+          }
+        } catch {
+          // xterm can be between layout and disposal while the pane is closing.
+        }
       });
+    };
+    const scheduleFit = () => {
+      window.clearTimeout(resizeTimer);
+      // The panel animates its width. Fitting on every animation frame makes
+      // interactive shells redraw their prompt into scrollback repeatedly.
+      resizeTimer = window.setTimeout(fit, 90);
+    };
+    requestFit.current = scheduleFit;
 
-      onInfoChange(null);
-      if (!attachToExisting) onStatusChange("starting");
+    const enqueueInput = (data: number[]) => {
+      if (!running.current || data.length === 0) return;
+      writeQueue = writeQueue
+        .then(() => host.terminal.write(terminalId, data))
+        .catch(() => undefined);
+    };
+    const dataSubscription = terminal.onData((data) =>
+      enqueueInput(Array.from(encoder.encode(data))),
+    );
+    const resizeSubscription = terminal.onResize(({ cols, rows }) => {
+      if (!running.current) return;
+      void host.terminal.resize(terminalId, cols, rows).catch(() => undefined);
+    });
 
-      const start = async () => {
-        if (startRequested) return;
-        startRequested = true;
-        if (!isDesktopHost()) {
-          onStatusChange(
-            "error",
-            "The terminal is available in the VINTAGE desktop app.",
-          );
+    onInfoChange(null);
+    if (!attachToExisting) onStatusChange("starting");
+
+    const start = async () => {
+      if (startRequested) return;
+      startRequested = true;
+      if (!isDesktopHost()) {
+        onStatusChange(
+          "error",
+          "The terminal is available in the VINTAGE desktop app.",
+        );
+        return;
+      }
+
+      const reportScreen = () => {
+        const launch = paneLaunchRef.current;
+        if (!launch || launch.launch.type !== "agent") return;
+        const agent = launch.launch.preset;
+        const buffer = terminal.buffer.active;
+        const start = Math.max(0, buffer.length - 80);
+        const rows: string[] = [];
+        for (let index = start; index < buffer.length; index += 1) {
+          const line = buffer.getLine(index);
+          if (line) rows.push(line.translateToString(true));
+        }
+        const snapshot = buildLogicalLines(
+          rows.map((text) => ({ text, newline: true })),
+        );
+        const opts = terminal.options as Record<string, unknown>;
+        const title =
+          typeof opts.windowsPty === "object" &&
+          opts.windowsPty !== null &&
+          typeof (opts.windowsPty as { title?: unknown }).title === "string"
+            ? (opts.windowsPty as { title: string }).title
+            : null;
+        const match = detectScreenActivity(agent, {
+          lines: snapshot,
+          title,
+          progress: null,
+        });
+        if (match && match.state !== "done") {
+          onScreenStateRef.current?.(match.state);
+        }
+      };
+      const scheduleScreenReport = () => {
+        window.clearTimeout(screenTimer);
+        screenTimer = window.setTimeout(reportScreen, 120);
+      };
+
+      try {
+        const listeners = await Promise.all([
+          host.terminal.onOutput((payload) => {
+            if (payload.terminalId === terminalId) {
+              terminal.write(Uint8Array.from(payload.data));
+              scheduleScreenReport();
+            }
+          }),
+          host.terminal.onExit((payload) => {
+            if (payload.terminalId !== terminalId || !active) return;
+            exited = true;
+            running.current = false;
+            const detail = payload.signal
+              ? `Shell stopped (${payload.signal}).`
+              : payload.exitCode === null || payload.exitCode === 0
+                ? "Shell exited."
+                : `Shell exited with code ${payload.exitCode}.`;
+            onStatusChange("exited", detail);
+          }),
+        ]);
+        if (!active) {
+          listeners.forEach((unlisten) => unlisten());
+          return;
+        }
+        unlisteners.push(...listeners);
+
+        if (attachToExisting) {
+          try {
+            await host.terminal.resize(
+              terminalId,
+              Math.max(2, terminal.cols),
+              Math.max(2, terminal.rows),
+            );
+            if (!active) return;
+            running.current = true;
+            onStatusChange("running");
+            terminal.focus();
+          } catch (error) {
+            if (active) onStatusChange("error", String(error));
+          }
           return;
         }
 
-        const reportScreen = () => {
-          const launch = paneLaunchRef.current;
-          if (!launch || launch.launch.type !== "agent") return;
-          const agent = launch.launch.preset;
-          const buffer = terminal.buffer.active;
-          const start = Math.max(0, buffer.length - 80);
-          const rows: string[] = [];
-          for (let index = start; index < buffer.length; index += 1) {
-            const line = buffer.getLine(index);
-            if (line) rows.push(line.translateToString(true));
-          }
-          const snapshot = buildLogicalLines(
-            rows.map((text) => ({ text, newline: true })),
-          );
-          const opts = terminal.options as Record<string, unknown>;
-          const title =
-            typeof opts.windowsPty === "object" &&
-            opts.windowsPty !== null &&
-            typeof (opts.windowsPty as { title?: unknown }).title === "string"
-              ? (opts.windowsPty as { title: string }).title
-              : null;
-          const match = detectScreenActivity(agent, {
-            lines: snapshot,
-            title,
-            progress: null,
-          });
-          if (match && match.state !== "done") {
-            onScreenStateRef.current?.(match.state);
-          }
-        };
-        const scheduleScreenReport = () => {
-          window.clearTimeout(screenTimer);
-          screenTimer = window.setTimeout(reportScreen, 120);
-        };
-
-        try {
-          const listeners = await Promise.all([
-            host.terminal.onOutput((payload) => {
-              if (payload.terminalId === terminalId) {
-                terminal.write(Uint8Array.from(payload.data));
-                scheduleScreenReport();
-              }
-            }),
-            host.terminal.onExit((payload) => {
-              if (payload.terminalId !== terminalId || !active) return;
-              exited = true;
-              running.current = false;
-              const detail = payload.signal
-                ? `Shell stopped (${payload.signal}).`
-                : payload.exitCode === null || payload.exitCode === 0
-                  ? "Shell exited."
-                  : `Shell exited with code ${payload.exitCode}.`;
-              onStatusChange("exited", detail);
-            }),
-          ]);
-          if (!active) {
-            listeners.forEach((unlisten) => unlisten());
-            return;
-          }
-          unlisteners.push(...listeners);
-
-          if (attachToExisting) {
-            try {
-              await host.terminal.resize(
+        const launchRequest = launchAtMount;
+        const info = await host.terminal.start(
+          launchRequest
+            ? {
                 terminalId,
-                Math.max(2, terminal.cols),
-                Math.max(2, terminal.rows),
-              );
-              if (!active) return;
-              running.current = true;
-              onStatusChange("running");
-              terminal.focus();
-            } catch (error) {
-              if (active) onStatusChange("error", String(error));
-            }
-            return;
-          }
-
-          const launchRequest = launchAtMount;
-          const info = await host.terminal.start(
-            launchRequest
-              ? {
-                  terminalId,
-                  paneId: launchRequest.paneId,
-                  generation: launchRequest.generation,
-                  workspaceId: launchRequest.workspaceId,
-                  launch: launchRequest.launch,
-                  cols: Math.max(2, terminal.cols),
-                  rows: Math.max(2, terminal.rows),
-                }
-              : {
-                  terminalId,
-                  workingDirectory,
-                  cols: Math.max(2, terminal.cols),
-                  rows: Math.max(2, terminal.rows),
-                },
-          );
-          started = true;
-          if (!active) {
-            void host.terminal.stop(terminalId).catch(() => undefined);
-            return;
-          }
-          onInfoChange(info);
-          if (exited) return;
-          running.current = true;
-          onStatusChange("running");
-          terminal.focus();
-        } catch (error) {
-          if (active) onStatusChange("error", String(error));
-        }
-      };
-      const resizeObserver = new ResizeObserver(scheduleFit);
-      resizeObserver.observe(target);
-      scheduleFit();
-
-      // The async IIFE can't return a cleanup to useEffect, so keep it on a
-      // shared ref that the outer effect teardown calls.
-      cleanupRef.current = () => {
-        active = false;
-        running.current = false;
-        requestFit.current = null;
-        window.clearTimeout(resizeTimer);
-        window.clearTimeout(screenTimer);
-        window.cancelAnimationFrame(resizeFrame);
-        resizeObserver.disconnect();
-        dataSubscription.dispose();
-        resizeSubscription.dispose();
-        unlisteners.forEach((unlisten) => unlisten());
-        // Workspace PTYs outlive transient split-tree remounts. Their owner stops
-        // them on explicit close or when the workspace root unmounts.
-        if (started && !launchAtMount)
+                paneId: launchRequest.paneId,
+                generation: launchRequest.generation,
+                workspaceId: launchRequest.workspaceId,
+                launch: launchRequest.launch,
+                cols: Math.max(2, terminal.cols),
+                rows: Math.max(2, terminal.rows),
+              }
+            : {
+                terminalId,
+                workingDirectory,
+                cols: Math.max(2, terminal.cols),
+                rows: Math.max(2, terminal.rows),
+              },
+        );
+        started = true;
+        if (!active) {
           void host.terminal.stop(terminalId).catch(() => undefined);
-        if (terminalInstance.current === terminal)
-          terminalInstance.current = null;
-        terminal.dispose();
-      };
-    })();
+          return;
+        }
+        onInfoChange(info);
+        if (exited) return;
+        running.current = true;
+        onStatusChange("running");
+        terminal.focus();
+      } catch (error) {
+        if (active) onStatusChange("error", String(error));
+      }
+    };
+    const resizeObserver = new ResizeObserver(scheduleFit);
+    resizeObserver.observe(target);
+    scheduleFit();
+
     return () => {
-      cleanupRef.current?.();
-      cleanupRef.current = null;
+      active = false;
+      running.current = false;
+      requestFit.current = null;
+      window.clearTimeout(resizeTimer);
+      window.clearTimeout(screenTimer);
+      window.cancelAnimationFrame(resizeFrame);
+      resizeObserver.disconnect();
+      dataSubscription.dispose();
+      resizeSubscription.dispose();
+      unlisteners.forEach((unlisten) => unlisten());
+      // Workspace PTYs outlive transient split-tree remounts. Their owner stops
+      // them on explicit close or when the workspace root unmounts.
+      if (started && !launchAtMount)
+        void host.terminal.stop(terminalId).catch(() => undefined);
+      if (terminalInstance.current === terminal)
+        terminalInstance.current = null;
+      terminal.dispose();
     };
   }, [restartToken]);
 
