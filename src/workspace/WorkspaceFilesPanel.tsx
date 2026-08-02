@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { FileExplorer } from "../FileExplorer.tsx";
+import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import type { WorkspaceState } from "./types.ts";
 
 export type FilesPanelTab = "files" | "preview";
@@ -68,11 +69,23 @@ export function WorkspaceFilesPanel({
 
       <div className="ws-files-content">
         {tab === "files" && (
-          <FileExplorer
-            active={active}
-            workspaceId={workspace.id}
-            workspaceTitle={workspace.title}
-          />
+          <ErrorBoundary
+            fallback={(error, onReset) => (
+              <div className="ws-files-error" role="alert">
+                <strong>Files could not be shown.</strong>
+                {error.message && <p>{error.message}</p>}
+                <button type="button" onClick={onReset}>
+                  Reload
+                </button>
+              </div>
+            )}
+          >
+            <FileExplorer
+              active={active}
+              workspaceId={workspace.id}
+              workspaceTitle={workspace.title}
+            />
+          </ErrorBoundary>
         )}
         {tab === "preview" && (
           <div className="ws-files-preview-empty">
