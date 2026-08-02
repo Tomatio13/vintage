@@ -1,0 +1,150 @@
+{
+  "id": "grok",
+  "version": "2026.07.16.2",
+  "updatedAt": "2026-07-16T00:00:00Z",
+  "rules": [
+    {
+      "id": "osc_title_blocked",
+      "state": "blocked",
+      "priority": 1300,
+      "region": { "kind": "osc_title" },
+      "visibleBlocker": true,
+      "condition": { "contains": ["Action Required"] }
+    },
+    {
+      "id": "option_dialog_blocked",
+      "state": "blocked",
+      "priority": 1200,
+      "region": { "kind": "whole_recent" },
+      "visibleBlocker": true,
+      "condition": { "lineRegex": ["^\\s*┃\\s+[0-9a-z]+\\s+\\([●○]\\)\\s"] }
+    },
+    {
+      "id": "permission_hints_blocked",
+      "state": "blocked",
+      "priority": 1190,
+      "region": { "kind": "bottom_lines", "n": 2 },
+      "visibleBlocker": true,
+      "condition": { "contains": [":select", "ctrl+o:yolo", "ctrl+c:cancel"] }
+    },
+    {
+      "id": "question_dialog_hints_blocked",
+      "state": "blocked",
+      "priority": 1185,
+      "region": { "kind": "bottom_lines", "n": 2 },
+      "visibleBlocker": true,
+      "condition": { "contains": ["tab:scrollback", "shift+x:dismiss"] }
+    },
+    {
+      "id": "permission_scope_selector",
+      "state": "blocked",
+      "priority": 1180,
+      "region": { "kind": "whole_recent" },
+      "visibleBlocker": true,
+      "condition": {
+        "contains": ["yes, proceed", "no, reject"],
+        "any": [
+          { "contains": ["use ← → to choose permission whitelist scope"] },
+          { "contains": ["←/→:scope"] }
+        ]
+      }
+    },
+    {
+      "id": "background_work_chip_working",
+      "state": "working",
+      "priority": 1170,
+      "region": { "kind": "top_lines", "n": 1 },
+      "visibleWorking": true,
+      "condition": { "lineRegex": ["[⋅:⸬⁙.·]\\s+[1-9][0-9]*\\s+│"] }
+    },
+    {
+      "id": "osc_progress_working",
+      "state": "working",
+      "priority": 1150,
+      "region": { "kind": "osc_progress" },
+      "visibleWorking": true,
+      "condition": { "regex": "^4;1;-1$" }
+    },
+    {
+      "id": "osc_title_idle",
+      "state": "idle",
+      "priority": 1100,
+      "region": { "kind": "osc_title" },
+      "visibleIdle": true,
+      "condition": {
+        "regex": "(?:^| - )grok$",
+        "not": [{ "regex": "[\\u{2800}-\\u{28FF}]" }]
+      }
+    },
+    {
+      "id": "osc_title_working",
+      "state": "working",
+      "priority": 1000,
+      "region": { "kind": "osc_title" },
+      "visibleWorking": true,
+      "condition": { "regex": "\\S" }
+    },
+    {
+      "id": "osc_progress_idle",
+      "state": "idle",
+      "priority": 950,
+      "region": { "kind": "osc_progress" },
+      "visibleIdle": true,
+      "condition": { "regex": "^4;0;0$" }
+    },
+    {
+      "id": "spinner_status_working",
+      "state": "working",
+      "priority": 200,
+      "region": { "kind": "whole_recent" },
+      "visibleWorking": true,
+      "condition": {
+        "lineRegex": ["^\\s*[\\u{2801}-\\u{28FF}]\\s.*\\[stop\\]\\s*$"]
+      }
+    },
+    {
+      "id": "esc_cancel_hints_working",
+      "state": "working",
+      "priority": 190,
+      "region": { "kind": "bottom_lines", "n": 2 },
+      "visibleWorking": true,
+      "condition": { "contains": ["esc:cancel", "ctrl+.:shortcuts"] }
+    },
+    {
+      "id": "waiting_tool_working",
+      "state": "working",
+      "priority": 120,
+      "region": { "kind": "whole_recent" },
+      "visibleWorking": true,
+      "condition": {
+        "any": [
+          {
+            "all": [
+              { "contains": ["ctrl+c:cancel", "ctrl+enter:interject"] },
+              { "contains": ["waiting"] }
+            ]
+          },
+          {
+            "lineRegex": [
+              "^\\s*[\\u{2801}-\\u{28FF}]\\s+(Run|Read|Search|List)\\b"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "prompt_hints_idle",
+      "state": "idle",
+      "priority": 100,
+      "region": { "kind": "bottom_lines", "n": 2 },
+      "visibleIdle": true,
+      "condition": {
+        "contains": ["ctrl+.:shortcuts"],
+        "not": [
+          { "contains": ["esc:cancel"] },
+          { "contains": ["ctrl+c:cancel"] }
+        ]
+      }
+    }
+  ]
+}

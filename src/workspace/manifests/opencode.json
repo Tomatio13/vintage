@@ -1,0 +1,58 @@
+{
+  "id": "opencode",
+  "version": "2026.06.10.1",
+  "updatedAt": "2026-06-10T00:00:00Z",
+  "rules": [
+    {
+      "id": "permission_required",
+      "state": "blocked",
+      "priority": 300,
+      "region": { "kind": "whole_recent" },
+      "visibleBlocker": true,
+      "condition": {
+        "any": [
+          { "contains": ["△ Permission required"] },
+          {
+            "contains": ["esc dismiss"],
+            "any": [
+              { "contains": ["enter confirm"] },
+              { "contains": ["enter submit"] },
+              { "contains": ["enter toggle"] }
+            ],
+            "all": [
+              {
+                "any": [
+                  { "contains": ["↑↓ select"] },
+                  { "contains": ["⇆ tab"] }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "interrupt_hint_working",
+      "state": "working",
+      "priority": 110,
+      "region": { "kind": "whole_recent" },
+      "visibleWorking": true,
+      "condition": {
+        "any": [
+          { "contains": ["esc to interrupt"] },
+          { "contains": ["ctrl+c to interrupt"] },
+          { "contains": ["press esc to interrupt"] },
+          { "lineRegex": ["(?i).*opencode.*esc (again to )?interrupt"] }
+        ]
+      }
+    },
+    {
+      "id": "progress_bar_working",
+      "state": "working",
+      "priority": 100,
+      "region": { "kind": "whole_recent" },
+      "visibleWorking": true,
+      "condition": { "regex": "(■|⬝){4,}" }
+    }
+  ]
+}

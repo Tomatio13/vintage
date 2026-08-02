@@ -1,0 +1,43 @@
+{
+  "name": "vintage",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Visual Interface for Terminal Agents.",
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm typecheck && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test:ui": "node --test tests/appearance.test.ts tests/fontScale.test.ts",
+    "test:workspace": "node --test tests/paneLayout.test.ts tests/workspacePersistence.test.ts tests/workspaceRegistry.test.ts tests/paneRuntime.test.ts",
+    "test:agents": "node --test tests/agentState.test.ts tests/screenDetection.test.ts",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "check": "pnpm build && pnpm test:ui && pnpm test:workspace && pnpm test:agents && pnpm test:rust && pnpm check:rust"
+  },
+  "dependencies": {
+    "@fontsource-variable/sora": "^5.2.8",
+    "@tauri-apps/api": "^2.11.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "highlight.js": "^11.11.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}

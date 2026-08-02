@@ -1,0 +1,94 @@
+{
+  "sentences": {
+    "Todo list": {
+      "ja": "TODOリスト"
+    },
+    "Track tasks with due dates and status": {
+      "ja": "期限とステータスでタスクを管理"
+    },
+    "Set up a todo list. First read `config/helps/todo-collection.md` and follow it exactly to author the todos collection — do not redesign the schema or ask me design questions.": {
+      "ja": "TODOリストをセットアップしてください。まず `config/helps/todo-collection.md` を読み、その内容に正確に従って todos コレクションを作成してください。スキーマを再設計したり、設計上の質問を私にしたりしないでください。"
+    },
+    "Contacts": {
+      "ja": "連絡先"
+    },
+    "People with details, read from a business card photo": {
+      "ja": "名刺の写真から読み取った詳細情報付きの人物"
+    },
+    "Create a contacts collection with name, company, title, email, phone, notes, and a business-card image. When I attach a photo of a business card, read the details off it and add a new contact.": {
+      "ja": "名前、会社名、役職、メールアドレス、電話番号、メモ、名刺画像を備えた連絡先コレクションを作成してください。名刺の写真を添付したら、そこから詳細を読み取って新しい連絡先を追加してください。"
+    },
+    "Reading list": {
+      "ja": "リーディングリスト"
+    },
+    "Save links to read, with unread reminders": {
+      "ja": "未読リマインダー付きで、読みたいリンクを保存"
+    },
+    "Create a reading-list collection with a title, a URL field, and a Read checkbox. While Read is unchecked, keep each item in the bell notifications, labeled with its title.": {
+      "ja": "タイトル、URL フィールド、既読チェックボックスを備えたリーディングリストコレクションを作成してください。既読のチェックが外れている間、各項目をタイトル付きでベル通知に表示し続けてください。"
+    },
+    "Restaurants": {
+      "ja": "レストラン"
+    },
+    "Places to try, rate after you've visited": {
+      "ja": "行ってみたいお店、訪問後に評価"
+    },
+    "Create a restaurants collection with name, cuisine, neighborhood, a website URL, a phone number, a Visited checkbox, a 1-to-5 rating, and notes. Hide the rating until I've marked a place as visited — there's nothing to rate before I've been.": {
+      "ja": "名前、料理ジャンル、エリア、ウェブサイトURL、電話番号、訪問済みチェックボックス、1〜5の評価、メモを備えたレストランコレクションを作成してください。その場所を訪問済みとしてマークするまで評価は非表示にしてください。まだ訪れていないうちは評価するものがないからです。"
+    },
+    "Bill Payments": {
+      "ja": "請求書の支払い"
+    },
+    "Recurring payments with due-date reminders": {
+      "ja": "支払期限リマインダー付きの定期払い"
+    },
+    "Create a bills collection to track recurring payments — payee, amount, due date, and status. Remind me 10 days before each bill is due, and when I mark one paid, automatically set up next month's bill.": {
+      "ja": "定期払いを追跡するための請求書コレクションを作成してください。支払先、金額、支払期限、ステータスを備えていてください。各請求書の支払期限の10日前にリマインドし、支払済みとしてマークしたら、来月分の請求書を自動でセットアップしてください。"
+    },
+    "Clients & time": {
+      "ja": "クライアントと時間"
+    },
+    "Consulting clients plus a worklog": {
+      "ja": "コンサルのクライアントと作業ログ"
+    },
+    "Set up client and time tracking for my consulting work. First read `config/helps/billing-clients-worklog.md` and follow it exactly to author the clients and worklog collections — do not redesign the schemas or ask me design questions.": {
+      "ja": "コンサルティング業務用のクライアントと時間のトラッキングをセットアップしてください。まず `config/helps/billing-clients-worklog.md` を読み、その内容に正確に従って clients コレクションと worklog コレクションを作成してください。スキーマを再設計したり、設計上の質問を私にしたりしないでください。"
+    },
+    "Invoicing": {
+      "ja": "請求"
+    },
+    "Invoices and your business profile": {
+      "ja": "請求書とビジネスプロフィール"
+    },
+    "Set up invoicing for my business. First read `config/helps/billing-invoice.md` and follow it exactly to author the invoice and profile collections — do not redesign the schemas or ask me design questions.": {
+      "ja": "ビジネス用の請求をセットアップしてください。まず `config/helps/billing-invoice.md` を読み、その内容に正確に従って請求書コレクションとプロフィールコレクションを作成してください。スキーマを再設計したり、設計上の質問を私にしたりしないでください。"
+    },
+    "Vocabulary": {
+      "ja": "語彙"
+    },
+    "Words and sample sentences for a language": {
+      "ja": "言語学習用の単語と例文"
+    },
+    "I want to build my vocabulary in a new language — ask me which language I'm learning and my current level, then read config/helps/vocabulary.md, set up a vocabulary collection, and fill it with fifty words and sample sentences appropriate for my level to track my progress": {
+      "ja": "新しい言語で語彙力を高めたいです。私が学習している言語と現在のレベルを質問し、それから config/helps/vocabulary.md を読んで語彙コレクションをセットアップし、私のレベルに合った50個の単語と例文を入力して、進捗を追跡できるようにしてください。"
+    },
+    "Lessons": {
+      "ja": "レッスン"
+    },
+    "A tracked course with a planned curriculum": {
+      "ja": "カリキュラムを計画した、進捗を管理するコース"
+    },
+    "I want to learn a topic as a tracked course — ask me the topic, my goal, and my current level, then read config/helps/lessons-collection.md, set up a lessons collection, and plan the curriculum before teaching the first lesson": {
+      "ja": "あるトピックを進捗を管理するコースとして学びたいです。トピック、目標、現在のレベルを質問し、それから config/helps/lessons-collection.md を読んでレッスンコレクションをセットアップし、最初のレッスンを教える前にカリキュラムを計画してください。"
+    },
+    "Stock portfolio": {
+      "ja": "株式ポートフォリオ"
+    },
+    "A watchlist plus valued holdings": {
+      "ja": "ウォッチリストと評価額付きの保有銘柄"
+    },
+    "Set up a stock portfolio tracker — a stock-quotes watchlist plus a portfolio that values my holdings against it. First read `config/helps/portfolio-tracker.md` and follow it exactly to author both collections — do not redesign the schemas or ask me design questions.": {
+      "ja": "株式ポートフォリオトラッカーをセットアップしてください。株価のウォッチリストと、それに基づいて保有銘柄を評価するポートフォリオで構成してください。まず `config/helps/portfolio-tracker.md` を読み、その内容に正確に従って両方のコレクションを作成してください。スキーマを再設計したり、設計上の質問を私にしたりしないでください。"
+    }
+  }
+}
