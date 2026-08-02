@@ -79,7 +79,7 @@ jobs:
           releaseBody: |
             ## Install VINTAGE
 
-            Install the [official Grok Build CLI](https://docs.x.ai/build/overview) first, then download the package for your computer:
+            VINTAGE runs agent CLIs (Grok, Codex, Claude Code, OpenCode, and more) side by side in terminal panes. Install the agent CLIs you want to use, then download the package for your computer:
 
             | Operating system | Package |
             | --- | --- |
