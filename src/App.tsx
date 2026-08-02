@@ -6,8 +6,10 @@ import "./styles/workspace.css";
 import { useAppearance } from "./appearance";
 import { useFontScale } from "./fontScale";
 import { useKeybindings } from "./settings/keybindings.ts";
+import { useDefaultShell } from "./settings/shells.ts";
 import { resolveTerminalFontFamily, useTerminalFont } from "./terminalFont.ts";
 import { host } from "./host";
+import type { ShellDescriptor } from "./host/types";
 import type { AppUpdateInfo, AppUpdateProgress } from "./host/types";
 import {
   SettingsScreen,
@@ -33,7 +35,9 @@ export function App() {
     setFontSize,
     setFontFamily,
   } = useTerminalFont();
+  const { preferredShellId, setPreferredShellId } = useDefaultShell();
   const overlayTitlebar = usesOverlayTitlebar();
+  const [shells, setShells] = useState<ShellDescriptor[]>([]);
   const [activeView, setActiveView] = useState<AppView>("session");
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsSection>("application");
@@ -54,6 +58,19 @@ export function App() {
       .check()
       .then((info) => {
         if (!cancelled) setAppUpdate(info);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void host.shells
+      .list()
+      .then((list) => {
+        if (!cancelled) setShells(list);
       })
       .catch(() => undefined);
     return () => {
@@ -115,10 +132,11 @@ export function App() {
         bindings={bindings}
         fontFamily={resolveTerminalFontFamily(terminalFont)}
         fontSize={terminalFont.size}
+        preferredShellId={preferredShellId}
         onOpenSettings={() => openSettings("application")}
       />
     ),
-    [resolvedAppearance, activeView, bindings, terminalFont],
+    [resolvedAppearance, activeView, bindings, terminalFont, preferredShellId],
   );
 
   return (
@@ -148,6 +166,8 @@ export function App() {
               fontScale={fontScale}
               bindings={bindings}
               terminalFont={terminalFont}
+              preferredShellId={preferredShellId}
+              shells={shells}
               appVersion={appVersion}
               update={appUpdate}
               updatePhase={updatePhase}
@@ -159,6 +179,7 @@ export function App() {
               onFontScaleChange={setFontScale}
               onTerminalFontSizeChange={setFontSize}
               onTerminalFontFamilyChange={setFontFamily}
+              onPreferredShellChange={setPreferredShellId}
               onBindKey={bind}
               onResetKeybindings={resetAll}
               onInstallUpdate={installUpdate}

@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:ui": "node --test tests/appearance.test.ts tests/fontScale.test.ts",
-    "test:workspace": "node --test tests/paneLayout.test.ts tests/workspacePersistence.test.ts tests/workspaceRegistry.test.ts tests/paneRuntime.test.ts tests/navigation.test.ts tests/shortcuts.test.ts tests/terminalFont.test.ts",
+    "test:workspace": "node --test tests/paneLayout.test.ts tests/workspacePersistence.test.ts tests/workspaceRegistry.test.ts tests/paneRuntime.test.ts tests/navigation.test.ts tests/shortcuts.test.ts tests/terminalFont.test.ts tests/shells.test.ts",
     "test:agents": "node --test tests/agentState.test.ts tests/screenDetection.test.ts",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",

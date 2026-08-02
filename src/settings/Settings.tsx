@@ -7,7 +7,11 @@ import {
   MAX_FONT_SCALE,
   MIN_FONT_SCALE,
 } from "../fontScale";
-import type { AppUpdateInfo, AppUpdateProgress } from "../host/types";
+import type {
+  AppUpdateInfo,
+  AppUpdateProgress,
+  ShellDescriptor,
+} from "../host/types";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   MAX_TERMINAL_FONT_SIZE,
@@ -137,6 +141,8 @@ export function SettingsScreen({
   fontScale,
   bindings,
   terminalFont,
+  preferredShellId,
+  shells,
   appVersion,
   update,
   updatePhase,
@@ -148,6 +154,7 @@ export function SettingsScreen({
   onFontScaleChange,
   onTerminalFontSizeChange,
   onTerminalFontFamilyChange,
+  onPreferredShellChange,
   onBindKey,
   onResetKeybindings,
   onInstallUpdate,
@@ -158,6 +165,8 @@ export function SettingsScreen({
   fontScale: number;
   bindings: ShortcutBinding[];
   terminalFont: TerminalFontSettings;
+  preferredShellId: string | null;
+  shells: ShellDescriptor[];
   appVersion: string | null;
   update: AppUpdateInfo | null;
   updatePhase: AppUpdatePhase;
@@ -169,6 +178,7 @@ export function SettingsScreen({
   onFontScaleChange: (scale: number) => void;
   onTerminalFontSizeChange: (size: number) => void;
   onTerminalFontFamilyChange: (preset: string, family?: string) => void;
+  onPreferredShellChange: (id: string) => void;
   onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
   onResetKeybindings: () => void;
   onInstallUpdate: () => void;
@@ -483,6 +493,35 @@ export function SettingsScreen({
                       Reset
                     </button>
                   </div>
+                </div>
+              </div>
+
+              <div className="settings-list">
+                <div className="settings-row">
+                  <div>
+                    <strong>Default shell</strong>
+                    <small>
+                      The shell new terminals start with. Existing terminals
+                      keep the shell they were started with.
+                    </small>
+                  </div>
+                  <select
+                    className="terminal-shell-select"
+                    value={preferredShellId ?? ""}
+                    aria-label="Default shell"
+                    onChange={(event) =>
+                      onPreferredShellChange(event.target.value)
+                    }
+                  >
+                    <option value="">Automatic</option>
+                    {shells
+                      .filter((shell) => shell.available)
+                      .map((shell) => (
+                        <option key={shell.id} value={shell.id}>
+                          {shell.label}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               </div>
             </section>

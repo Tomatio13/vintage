@@ -23,6 +23,7 @@ import {
   navigateTabs,
   navigateWorkspaces,
 } from "./navigation.ts";
+import { resolvePreferredShellId } from "../settings/shells.ts";
 import {
   paneRuntimeOrStopped,
   removePaneRuntime,
@@ -55,6 +56,7 @@ export function WorkspaceApp({
   bindings,
   fontFamily,
   fontSize,
+  preferredShellId,
   onOpenSettings,
 }: {
   appearance: ResolvedAppearance;
@@ -66,6 +68,8 @@ export function WorkspaceApp({
   fontFamily: string;
   /** Terminal font size in pixels. */
   fontSize: number;
+  /** User-chosen default shell id, or null for the platform default. */
+  preferredShellId: string | null;
   onOpenSettings: () => void;
 }) {
   const {
@@ -149,18 +153,13 @@ export function WorkspaceApp({
       ]);
       if (cancelled) return;
       setRoots(rootList);
-      const preferred =
-        shellList.find(
-          (shell) =>
-            shell.available &&
-            (shell.id === "unix-default" || shell.id === "windows-default"),
-        ) ?? shellList.find((shell) => shell.available);
-      if (preferred) setDefaultShellId(preferred.id);
+      const preferred = resolvePreferredShellId(preferredShellId, shellList);
+      if (preferred) setDefaultShellId(preferred);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preferredShellId]);
 
   // Registered roots that are missing from the layout join it. A root that is
   // explicitly removed is deleted from both the registry and saved layout.

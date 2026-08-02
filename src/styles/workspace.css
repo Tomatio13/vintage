@@ -988,6 +988,18 @@
   font: calc((9px) * var(--app-font-scale)) var(--mono);
 }
 
+.terminal-shell-select {
+  max-width: 260px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font: calc((9px) * var(--app-font-scale)) var(--mono);
+}
+
+
 .terminal-font-input {
   width: 240px;
   height: 30px;
