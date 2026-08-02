@@ -42,6 +42,9 @@ Coding agents are most productive when they can work in parallel. VINTAGE gives 
 - **Restart-safe:** Quit and reopen — placement is restored; processes are not silently relaunched.
 - **Native desktop host:** Process and filesystem access stay behind typed Tauri commands in the Rust host.
 
+
+<img src="docs/assets/vintage-main.png" alt="VINTAGE">
+
 ## What works today
 
 | Area | Current support |
