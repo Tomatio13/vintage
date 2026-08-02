@@ -1,51 +1,53 @@
-<h1 align="center">
-  <img src="docs/assets/vintage-logo.svg" alt="VINTAGE" width="300">
-</h1>
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="VINTAGE runs coding agents in real split terminals and shows which one needs attention">
+</p>
 
 <p align="center">
   <strong>Visual Interface for Terminal Agents.</strong><br>
   An open-source multi-agent desktop workspace.
 </p>
 
+
 <p align="center">
   Run Grok, Codex, Claude Code, and OpenCode side by side in real terminal panes, and follow every agent's progress from one place.
 </p>
 
 <p align="center">
-  <a href="#install-vintage">Install</a> ·
-  <a href="#what-works-today">Features</a> ·
+  <a href="./README_JP.md">日本語</a> · <strong>English</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Tomatio13/vintage/releases/latest"><strong>Download VINTAGE</strong></a> ·
   <a href="#getting-started">Getting started</a> ·
-  <a href="#development">Development</a> ·
+  <a href="#what-vintage-does">Features</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 > [!WARNING]
-> VINTAGE is an early release under active development. Features, stored navigation metadata, and compatibility may change between releases.
+> VINTAGE is an early release under active development. Features, compatibility, and stored navigation metadata may change between releases.
 
 > [!IMPORTANT]
-> VINTAGE is an independent, unofficial project and is not affiliated with or endorsed by xAI.
+> VINTAGE is an independent, unofficial project. It is not affiliated with or endorsed by the companies behind the supported agent CLIs.
+
+## One workspace. Every agent in view.
+
+VINTAGE gives every coding agent a real terminal pane and rolls its activity up into one sidebar. Run Grok, Codex, Claude Code, OpenCode, or any custom command in parallel, then jump directly to the workspace that is blocked, working, or done.
 
 <p align="center">
-  <strong><a href="https://github.com/Tomatio13/vintage/releases/latest">Download the latest release</a></strong>
+  <img src="./docs/assets/vintage-main.png" width="100%" alt="VINTAGE desktop interface with a workspace sidebar, split terminal panes, and file preview">
 </p>
 
-## Why VINTAGE
+## What VINTAGE does
 
-Coding agents are most productive when they can work in parallel. VINTAGE gives each agent a real terminal pane inside a persistent desktop workspace, so you can start several agents and jump to the one that needs a decision.
+- **Runs real terminals.** Each pane owns an interactive shell process with scrollback, input, resize, restart, and explicit teardown.
+- **Organizes parallel work.** Tabs and recursively split panes let several agents work inside the same registered project folder.
+- **Surfaces attention.** Agent activity rolls up from pane to tab to workspace as `blocked`, `working`, `done`, or `idle`.
+- **Session resume is under development.** The host-side resume commands and authenticated reporting pipeline exist, but Hook/Plugin setup is not yet exposed as a supported end-to-end feature.
+- **Keeps files close.** Browse a live workspace tree and preview text, source, images, PDF documents, and fonts without leaving the app.
+- **Restores placement, not processes.** Workspaces, tabs, splits, and pane definitions survive a restart; commands are never relaunched silently.
+- **Updates in place.** Signed update bundles are delivered through GitHub Releases and installed by the desktop app.
 
-- **Real terminals:** Every pane is an actual shell process. Run any interactive command, keep scrollback, and switch panes without losing state.
-- **Multiple agents:** Launch Grok, Codex, Claude Code, or OpenCode in separate tabs or split panes, each rooted in the workspace.
-- **Attention at a glance:** Sidebar badges roll up each agent's state — `blocked`, `working`, `done`, `idle` — so you know which project needs you now.
-- **Recursive panes:** Split any pane horizontally or vertically, resize dividers with the mouse or keyboard, and close panes back down.
-- **Workspace files:** Browse and preview files on the right, watching the workspace for changes.
-- **Session identity:** Hooks and plugins report native session ids, so a stopped pane can be restarted into the same session when the CLI supports it.
-- **Restart-safe:** Quit and reopen — placement is restored; processes are not silently relaunched.
-- **Native desktop host:** Process and filesystem access stay behind typed Tauri commands in the Rust host.
-
-
-<img src="docs/assets/vintage-main.png" alt="VINTAGE">
-
-## What works today
+## Current support
 
 | Area | Current support |
 | --- | --- |
@@ -53,11 +55,13 @@ Coding agents are most productive when they can work in parallel. VINTAGE gives 
 | Terminals | Interactive shell panes with tabs, recursive horizontal/vertical splits, divider resize, restart, and close |
 | Shells | PowerShell 5.1 / 7, Git Bash, Ubuntu default shell, Bash, Zsh, and validated custom executables |
 | Agents | Grok, Codex, Claude Code, and OpenCode presets plus arbitrary custom programs; each runs inside a shell and returns to it when it exits |
-| Activity | Screen-manifest detection (Herdr-ported) plus hook/plugin reporting with session identity; sidebar badges roll up to the workspace |
-| Restart | A stopped pane can restart into a fresh shell or resume the previous native session (`codex resume`, `claude --resume`, `opencode --session`) |
+| Activity | Screen-manifest detection (Herdr-ported) rolls sidebar badges up to the workspace. Hook/Plugin reporting is under development and is not yet available as a supported end-to-end feature |
+| Restart | A stopped pane can restart into a fresh shell. Native session resume is under development and depends on the unfinished Hook/Plugin reporting integration |
 | Workspace files | Live file tree with hidden-file controls, system file-manager actions, and syntax-highlighted text, image, PDF, and font previews |
 | Layout | Placement persists to `workspace-layouts.json`; damaged files stop autosave and offer a back-up-and-reset flow |
 | Updates | Signed in-app updates backed by GitHub Releases |
+
+VINTAGE currently ships for Windows x86-64 and Linux x86-64. Supported shells include PowerShell 5.1/7, Git Bash, Bash, Zsh, the Ubuntu default shell, and validated custom executables.
 
 ## Install VINTAGE
 
@@ -82,15 +86,9 @@ Download VINTAGE only from the official [GitHub Releases page](https://github.co
 
 | Operating system | Package to download | Architecture |
 | --- | --- | --- |
-| macOS on Apple Silicon | `VINTAGE_*_aarch64.dmg` | Apple M1 or later |
-| macOS on Intel | `VINTAGE_*_x64.dmg` | Intel 64-bit |
 | Windows | `VINTAGE_*_x64-setup.exe` | x86-64 |
 | Debian or Ubuntu | `VINTAGE_*_amd64.deb` | x86-64 |
 | Other Linux distributions | `VINTAGE_*_amd64.AppImage` | x86-64 |
-
-#### macOS
-
-Open the `.dmg`, then drag **VINTAGE** into the **Applications** folder. macOS release builds are code signed and notarized by Apple.
 
 #### Windows
 
@@ -143,14 +141,14 @@ Tauri Rust host
 Shell process running the agent CLI
 ```
 
-The React renderer does not start processes or access the filesystem directly. The Rust host owns shell detection, executable validation, PTY creation and teardown, workspace registration and watching, file previews, hook/plugin integration, and the local hook IPC server.
+The React renderer does not start processes or access the filesystem directly. The Rust host owns shell detection, executable validation, PTY creation and teardown, workspace registration and watching, file previews, and the in-progress Hook/Plugin integration infrastructure, including the local IPC server.
 
 Each pane is a real PTY running a detected shell (PowerShell, Git Bash, Bash, Zsh, or a validated custom executable). Agent presets launch inside that shell and return to it when they exit, so the pane stays interactive. Per-pane generations guard stale host events.
 
-Activity comes from two layers kept deliberately separate:
+Activity is designed as two separate layers. Screen-manifest detection is available today; the Hook/Plugin reporting path described below is still under development:
 
 - The PTY state (starting / running / stopped / exited / error) tracks the process.
-- Agent activity (unknown / idle / working / blocked / done) comes from screen-manifest matching of the live bottom buffer (ported from Herdr) and, where installed, from hook/plugin reports over a local IPC loopback server authenticated by a 256-bit per-launch token.
+- Agent activity (unknown / idle / working / blocked / done) currently comes from screen-manifest matching of the live bottom buffer (ported from Herdr). The host-side authenticated IPC and agent assets exist, but installation UI, agent configuration wiring, and end-to-end verification for Hook/Plugin reports are not complete.
 
 Placement persists to `workspace-layouts.json`; runtime state — PTY ids, scrollback, hook tokens, prompts — never does. Quitting VINTAGE stops every PTY, descendant process, file watcher, and hook IPC connection.
 
@@ -173,7 +171,7 @@ For a full layer map, trust boundaries, and patterns you can reuse in other desk
 Requirements:
 
 - Node.js 24 or later
-- pnpm 10
+- pnpm 11
 - Rust 1.88 or later
 - Any of the supported agent CLIs you intend to run (Grok, Codex, Claude Code, OpenCode)
 
@@ -196,7 +194,7 @@ pnpm dev
 
 - Tauri 2 and Rust
 - React 19, TypeScript, and Vite
-- xterm.js with a Rust-hosted pseudoterminal
+- ghostty-web (Ghostty's WASM terminal emulator) over a Rust-hosted pseudoterminal
 - pnpm
 - A typed host facade over Tauri commands and events (no direct process/FS access from the renderer)
 
@@ -229,22 +227,18 @@ Configure these GitHub Actions secrets before the first release:
 
 - `TAURI_SIGNING_PRIVATE_KEY` with the contents of `~/.tauri/vintage.key`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the updater key is password-protected
-- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, and `APPLE_SIGNING_IDENTITY` for macOS code signing
-- `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` for macOS notarization
 
 For each release:
 
 1. Update the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-1. Merge the release commit into `develop`.
-1. Open a pull request from `develop` to `main` and merge it after its required checks pass. The merge automatically starts the **Release** workflow.
+1. Open a pull request from `develop` to `main` and merge it after its required checks pass, or run the **Release** workflow manually from `main`.
 1. Wait for every matrix job to finish and inspect the draft GitHub Release.
 1. Test each installer on its target operating system before publishing the draft.
 
-The [release workflow](.github/workflows/release.yml) runs when a version change in `src-tauri/tauri.conf.json` reaches `main`. It builds both macOS architectures, Windows NSIS, and Linux AppImage/DEB artifacts, signs updater bundles, generates `latest.json`, and creates a draft GitHub Release. If a run must be retried manually, run the workflow with `main` selected. Publish the draft only after testing its installers.
+The [release workflow](.github/workflows/release.yml) runs when a version change in `src-tauri/tauri.conf.json` reaches `main`, and can also be run manually with `main` selected. It builds Windows NSIS and Linux AppImage/DEB artifacts, signs updater bundles, generates `latest.json`, and creates a draft GitHub Release. Publish the draft only after testing its installers.
 
 Before publishing, confirm that the draft contains:
 
-- Apple Silicon and Intel `.dmg` installers, plus their signed `.app.tar.gz` updater bundles.
 - The Windows NSIS `.exe` installer and its `.sig` file.
 - Linux `.AppImage` and `.deb` packages and both `.sig` files.
 - A `latest.json` whose version and platform entries match the uploaded updater bundles.
@@ -258,4 +252,4 @@ An installation that predates updater support cannot discover the updater-enable
 
 ## License
 
-VINTAGE is available under the [Apache License 2.0](LICENSE).
+VINTAGE is available under the [MIT License](LICENSE).

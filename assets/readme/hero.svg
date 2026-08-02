@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="400" viewBox="0 0 1200 400"
+     role="img" aria-labelledby="title desc">
+  <title id="title">VINTAGE — visual interface for terminal agents</title>
+  <desc id="desc">A desktop workspace that runs coding agents in real split terminal panes and rolls their activity up into one sidebar.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#070d1a"/>
+      <stop offset="1" stop-color="#04070f"/>
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#42c8ff"/>
+      <stop offset="1" stop-color="#006edc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="400" rx="24" fill="url(#bg)"/>
+
+  <!-- left: title block -->
+  <g transform="translate(56 44)">
+    <text x="0" y="0" fill="#60789a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="3">
+      TERMINAL WORKSPACE FOR CODING AGENTS
+    </text>
+
+    <!-- Project logo, inlined from docs/assets/vintage-logo.svg for GitHub-safe rendering. -->
+    <g id="vintage-logo" transform="translate(-2 18) scale(1.15)">
+      <circle cx="84" cy="28" r="16" fill="#42c8ff"/>
+      <path d="M0 69 L20 59 L40 71 L62 61 L82 69 L96 65 L96 84 L0 84 Z" fill="#2c4a70"/>
+      <path d="M0 63 L26 47 L48 63 L70 45 L96 59 L96 84 L0 84 Z" fill="#4a7fb8"/>
+      <path d="M10 57 L26 47 L35 57 Z" fill="#142033"/>
+      <path d="M57 56 L70 45 L80 51 Z" fill="#142033"/>
+      <path d="M0 57 L24 39 L46 55 L66 29 L96 45 L96 84 L0 84 Z" fill="#dcebfb"/>
+      <path d="M8 51 L24 39 L33 49 L24 44 Z" fill="#142033"/>
+      <path d="M54 45 L66 29 L78 38 L66 36 Z" fill="#142033"/>
+      <text x="102" y="50" dominant-baseline="middle" font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="720" letter-spacing="-1.8" fill="#e5f0ff">VINT<tspan fill="#42c8ff">AGE</tspan></text>
+    </g>
+
+    <text x="0" y="160" fill="#9db2c8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22">
+      Run coding agents side by side in real terminal panes
+    </text>
+    <text x="0" y="190" fill="#9db2c8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22">
+      and see which one needs you — without chasing tabs.
+    </text>
+
+    <rect x="0" y="216" width="320" height="3" rx="1.5" fill="url(#accentLine)"/>
+
+    <!-- terminal prompt motif -->
+    <text x="0" y="258" fill="#42c8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20">$</text>
+    <text x="30" y="258" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20">codex</text>
+    <rect x="102" y="244" width="12" height="24" rx="2" fill="#42c8ff" opacity="0.85"/>
+
+    <text x="0" y="298" fill="#6f8ca9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+      REAL PTYS  /  RECURSIVE SPLITS  /  AGENT ATTENTION
+    </text>
+
+    <g transform="translate(0 316)">
+      <!-- agent status badges -->
+      <rect x="0" y="0" width="150" height="34" rx="8" fill="#0d1728" stroke="#1b3352"/>
+      <circle cx="18" cy="17" r="5" fill="#42c8ff"/>
+      <text x="32" y="22" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">codex · working</text>
+
+      <rect x="160" y="0" width="175" height="34" rx="8" fill="#0d1728" stroke="#1b3352"/>
+      <circle cx="178" cy="17" r="5" fill="#e6c56f"/>
+      <text x="192" y="22" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">claude · blocked</text>
+
+      <rect x="345" y="0" width="165" height="34" rx="8" fill="#0d1728" stroke="#1b3352"/>
+      <circle cx="363" cy="17" r="5" fill="#42c8ff"/>
+      <text x="377" y="22" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">opencode · done</text>
+    </g>
+  </g>
+
+  <!-- right: terminal panes -->
+  <g transform="translate(650 44)">
+    <!-- pane 1 -->
+    <rect x="0" y="0" width="500" height="150" rx="12" fill="#0a1120" stroke="#1b3352"/>
+    <rect x="0" y="0" width="500" height="32" rx="12" fill="#0d1728"/>
+    <rect x="0" y="16" width="500" height="16" fill="#0d1728"/>
+    <circle cx="18" cy="16" r="5" fill="#ff7e68"/>
+    <circle cx="34" cy="16" r="5" fill="#e6c56f"/>
+    <circle cx="50" cy="16" r="5" fill="#5ee6a8"/>
+    <text x="70" y="22" fill="#60789a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">Codex — tests</text>
+    <text x="18" y="62" fill="#42c8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">$</text>
+    <text x="32" y="62" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">codex</text>
+    <text x="18" y="88" fill="#7f98b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">  working in workspace…</text>
+    <text x="18" y="112" fill="#7f98b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">  waiting for terminal output</text>
+    <rect x="18" y="124" width="10" height="16" rx="2" fill="#42c8ff" opacity="0.7"/>
+
+    <!-- pane 2 -->
+    <rect x="0" y="162" width="242" height="150" rx="12" fill="#0a1120" stroke="#1b3352"/>
+    <rect x="0" y="162" width="242" height="32" rx="12" fill="#0d1728"/>
+    <rect x="0" y="178" width="242" height="16" fill="#0d1728"/>
+    <circle cx="18" cy="178" r="5" fill="#ff7e68"/>
+    <circle cx="34" cy="178" r="5" fill="#e6c56f"/>
+    <circle cx="50" cy="178" r="5" fill="#5ee6a8"/>
+    <text x="70" y="184" fill="#60789a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">Claude Code</text>
+    <text x="18" y="220" fill="#42c8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">$</text>
+    <text x="32" y="220" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">claude</text>
+    <text x="18" y="246" fill="#7f98b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">  ❯ reading config…</text>
+
+    <!-- pane 3 -->
+    <rect x="254" y="162" width="246" height="150" rx="12" fill="#0a1120" stroke="#1b3352"/>
+    <rect x="254" y="162" width="246" height="32" rx="12" fill="#0d1728"/>
+    <rect x="254" y="178" width="246" height="16" fill="#0d1728"/>
+    <circle cx="272" cy="178" r="5" fill="#ff7e68"/>
+    <circle cx="288" cy="178" r="5" fill="#e6c56f"/>
+    <circle cx="304" cy="178" r="5" fill="#5ee6a8"/>
+    <text x="324" y="184" fill="#60789a" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">OpenCode</text>
+    <text x="272" y="220" fill="#42c8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">$</text>
+    <text x="286" y="220" fill="#d9e8ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">opencode</text>
+    <text x="272" y="246" fill="#5ee6a8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">  ✓ task complete</text>
+  </g>
+  <path d="M56 366H1144" stroke="#17304a"/>
+</svg>

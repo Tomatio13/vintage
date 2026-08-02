@@ -15,7 +15,7 @@ ______________________________________________________________________
 | エージェント実行環境 | 各 CLI（Grok / Codex / Claude Code / OpenCode）を検出済みシェル内で起動 |
 | 端末 | `portable-pty` による PTY。xterm.js が描画 |
 | 永続化 | ワークスペース登録（`working-directories.json`）と配置（`workspace-layouts.json`）のみ |
-| 状態判定 | 画面マニフェスト照合（Herdr移植）+ Hook／Plugin 報告 |
+| 状態判定 | 画面マニフェスト照合（Herdr移植）。Hook／Plugin 報告は開発中 |
 
 **設計意図:** UI は **投影（projection）と操作面** に徹する。プロセス起動、ファイルシステム、資格情報、エージェント CLI は **Rust ホストだけ** が持つ。
 
@@ -204,7 +204,7 @@ ______________________________________________________________________
 
 - プリセット（Grok／Codex／Claude／OpenCode）は CLI 名で PATH 解決し、resume フラグ（`codex resume`／`claude --resume`／`opencode --session`）に対応。未検出でもプロファイル内 PATH を考慮して起動操作は許可し、spawn 失敗時に英語エラー。
 - 画面判定は xterm.js の **ライブ下端 80 論理行**（スクロール位置や古い履歴は使わない）を、Herdr から移植したマニフェストで照合。`contains` は case-insensitive、`(?i)/(?m)` と `\u{...}` は JS 正規表現へ変換。
-- Codex／Claude の Hook はセッション ID 取得専用。OpenCode Plugin は活動状態の信頼源で、`session.deleted` で権限解放。画面判定は Plugin 権限がない間だけ適用。
+- **開発中:** Codex／Claude HookのセッションID報告とOpenCode Pluginの活動状態報告は、ホスト側IPCと資産まで実装済み。導入UI、エージェント設定への登録、実CLIを使ったエンドツーエンド検証は未完了。現在利用できる状態判定は画面マニフェスト照合。
 - 集約優先順位は `blocked > working > done > idle > unknown`。PTY `error` は blocked 相当＋別バッジ。
 
 ______________________________________________________________________
