@@ -1,40 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 350 96" role="img" aria-labelledby="title description">
   <title id="title">VINTAGE</title>
-  <desc id="description">VINTAGE orbit symbol and wordmark</desc>
+  <desc id="description">VINTAGE mountain-ridge mark and wordmark</desc>
   <style>
-    .disc { fill: #142033; stroke: #006edc; }
-    .orbit { fill: none; stroke: #f4f8ff; }
+    .ridge-back { fill: #8fb4dc; }
+    .ridge-mid { fill: #4f8fd6; }
+    .ridge-front { fill: #142033; }
+    .cap { fill: #ffffff; }
+    .sun { fill: #bfdcf7; }
     .wordmark { fill: #142033; }
     .agent { fill: #006edc; }
 
     @media (prefers-color-scheme: dark) {
-      .disc { fill: #e5f0ff; stroke: #42c8ff; }
-      .orbit { stroke: #050914; }
+      .ridge-back { fill: #2c4a70; }
+      .ridge-mid { fill: #4a7fb8; }
+      .ridge-front { fill: #dcebfb; }
+      .cap { fill: #142033; }
+      .sun { fill: #42c8ff; }
       .wordmark { fill: #e5f0ff; }
       .agent { fill: #42c8ff; }
     }
   </style>
 
   <g aria-hidden="true">
-    <circle class="disc" cx="48" cy="48" r="35" stroke-width="2.5" />
-    <ellipse
-      class="orbit"
-      cx="48"
-      cy="48"
-      rx="23.75"
-      ry="12.5"
-      stroke-width="5"
-      transform="rotate(32 48 48)"
+    <!-- sunrise disc behind the front ridge -->
+    <circle class="sun" cx="84" cy="28" r="16" />
+
+    <!-- back ridge (lightest, farthest) -->
+    <path
+      class="ridge-back"
+      d="M0 69 L20 59 L40 71 L62 61 L82 69 L96 65 L96 84 L0 84 Z"
     />
-    <ellipse
-      class="orbit"
-      cx="48"
-      cy="48"
-      rx="23.75"
-      ry="12.5"
-      stroke-width="5"
-      transform="rotate(-32 48 48)"
+    <!-- middle ridge -->
+    <path
+      class="ridge-mid"
+      d="M0 63 L26 47 L48 63 L70 45 L96 59 L96 84 L0 84 Z"
     />
+    <!-- snowcaps on the middle ridge -->
+    <path class="cap" d="M10 57 L26 47 L35 57 Z" />
+    <path class="cap" d="M57 56 L70 45 L80 51 Z" />
+    <!-- front ridge (darkest, closest) -->
+    <path
+      class="ridge-front"
+      d="M0 57 L24 39 L46 55 L66 29 L96 45 L96 84 L0 84 Z"
+    />
+    <!-- snowcaps on the front ridge -->
+    <path class="cap" d="M8 51 L24 39 L33 49 L24 44 Z" />
+    <path class="cap" d="M54 45 L66 29 L78 38 L66 36 Z" />
   </g>
 
   <text

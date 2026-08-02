@@ -1,40 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="tile" x1="74" y1="56" x2="438" y2="464" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff" />
-      <stop offset="1" stop-color="#e9efed" />
-    </linearGradient>
-    <radialGradient id="space" cx="34%" cy="18%" r="82%">
-      <stop offset="0" stop-color="#24483d" />
-      <stop offset="0.5" stop-color="#121a17" />
-      <stop offset="1" stop-color="#090b0a" />
-    </radialGradient>
-  </defs>
-  <path
-    d="M144 36H368C429 36 476 83 476 144V368C476 429 429 476 368 476H144C83 476 36 429 36 368V144C36 83 83 36 144 36Z"
-    fill="url(#tile)"
-    stroke="#d4dedb"
-    stroke-width="4"
-  />
-  <circle cx="256" cy="256" r="164" fill="url(#space)" stroke="#8fe3c1" stroke-width="8" />
-  <ellipse
-    cx="256"
-    cy="256"
-    rx="112"
-    ry="58"
-    fill="none"
-    stroke="#eff5f2"
-    stroke-width="24"
-    transform="rotate(32 256 256)"
-  />
-  <ellipse
-    cx="256"
-    cy="256"
-    rx="112"
-    ry="58"
-    fill="none"
-    stroke="#eff5f2"
-    stroke-width="24"
-    transform="rotate(-32 256 256)"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">VINTAGE</title>
+  <desc id="description">VINTAGE mountain-ridge app icon</desc>
+
+  <!-- The mountain-ridge mark from vintage-logo.svg, scaled to fill the square -->
+  <g transform="translate(46 98.5) scale(4.375)">
+    <!-- sunrise disc behind the front ridge -->
+    <circle fill="#bfdcf7" cx="84" cy="28" r="16" />
+
+    <!-- back ridge (lightest, farthest) -->
+    <path
+      fill="#8fb4dc"
+      d="M0 69 L20 59 L40 71 L62 61 L82 69 L96 65 L96 84 L0 84 Z"
+    />
+    <!-- middle ridge -->
+    <path
+      fill="#4f8fd6"
+      d="M0 63 L26 47 L48 63 L70 45 L96 59 L96 84 L0 84 Z"
+    />
+    <!-- snowcaps on the middle ridge -->
+    <path fill="#ffffff" d="M10 57 L26 47 L35 57 Z" />
+    <path fill="#ffffff" d="M57 56 L70 45 L80 51 Z" />
+    <!-- front ridge (darkest, closest) -->
+    <path
+      fill="#142033"
+      d="M0 57 L24 39 L46 55 L66 29 L96 45 L96 84 L0 84 Z"
+    />
+    <!-- snowcaps on the front ridge -->
+    <path fill="#ffffff" d="M8 51 L24 39 L33 49 L24 44 Z" />
+    <path fill="#ffffff" d="M54 45 L66 29 L78 38 L66 36 Z" />
+  </g>
 </svg>
