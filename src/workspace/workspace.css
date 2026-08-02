@@ -404,7 +404,6 @@ body.is-resizing-ws-panel .ws-panel-resizer::after {
   font: inherit;
 }
 
-
 .ws-tab[data-selected="true"] {
   background: var(--ws-bg);
   color: var(--ws-text);
@@ -575,7 +574,11 @@ body.is-resizing-ws-divider .ws-divider::after {
   overflow: hidden;
 }
 
-.ws-pane-terminal .terminal-surface .xterm {
+/* xterm.js and ghostty-web both place a child element that must fill the
+   surface. Target the direct children generically so either renderer works. */
+.ws-pane-terminal .terminal-surface > .xterm,
+.ws-pane-terminal .terminal-surface > canvas,
+.ws-pane-terminal .terminal-surface > div {
   position: absolute;
   inset: 0;
   height: 100%;
@@ -869,7 +872,11 @@ body.is-resizing-ws-divider .ws-divider::after {
   --tool-hover: color-mix(in srgb, var(--ws-accent) 8%, transparent);
   --tool-selected: var(--ws-accent-soft);
   --tool-border: var(--ws-border);
-  --tool-border-strong: color-mix(in srgb, var(--ws-border) 72%, var(--ws-text-dim));
+  --tool-border-strong: color-mix(
+    in srgb,
+    var(--ws-border) 72%,
+    var(--ws-text-dim)
+  );
   --tool-text: var(--ws-text);
   --tool-text-strong: var(--ws-text);
   --tool-muted: var(--ws-text-dim);
@@ -986,7 +993,6 @@ body.is-resizing-ws-divider .ws-divider::after {
   border-color: var(--ws-accent);
   color: var(--ws-accent);
 }
-
 
 .ws-files-toggle {
   flex: none;
