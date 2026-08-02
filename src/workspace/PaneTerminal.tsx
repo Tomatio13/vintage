@@ -25,6 +25,10 @@ export interface PaneTerminalProps {
   /** This pane is the selected pane of the active tab; it owns xterm focus. */
   selected: boolean;
   appearance: ResolvedAppearance;
+  /** CSS font-family stack for the terminal surface. */
+  fontFamily: string;
+  /** Terminal font size in pixels. */
+  fontSize: number;
   onStart: (paneId: string) => void;
   onClose: (paneId: string) => void;
   onSplit: (paneId: string, direction: "horizontal" | "vertical") => void;
@@ -54,6 +58,8 @@ export function PaneTerminal({
   active,
   selected,
   appearance,
+  fontFamily,
+  fontSize,
   onStart,
   onClose,
   onSplit,
@@ -125,6 +131,8 @@ export function PaneTerminal({
             workingDirectory={null}
             restartToken={runtime.generation}
             focusRequest={focusRequest}
+            fontFamily={fontFamily}
+            fontSize={fontSize}
             paneLaunch={{
               terminalId: runtime.terminalId,
               paneId: pane.id,

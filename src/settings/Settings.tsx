@@ -8,6 +8,14 @@ import {
   MIN_FONT_SCALE,
 } from "../fontScale";
 import type { AppUpdateInfo, AppUpdateProgress } from "../host/types";
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_PRESETS,
+  TERMINAL_FONT_SIZE_STEP,
+  type TerminalFontSettings,
+} from "../terminalFont.ts";
 import type { AppUpdatePhase } from "../update/types";
 import { Icon } from "../ui/Icon";
 import {
@@ -128,6 +136,7 @@ export function SettingsScreen({
   appearance,
   fontScale,
   bindings,
+  terminalFont,
   appVersion,
   update,
   updatePhase,
@@ -137,6 +146,8 @@ export function SettingsScreen({
   onCheckForUpdates,
   onAppearanceChange,
   onFontScaleChange,
+  onTerminalFontSizeChange,
+  onTerminalFontFamilyChange,
   onBindKey,
   onResetKeybindings,
   onInstallUpdate,
@@ -146,6 +157,7 @@ export function SettingsScreen({
   appearance: AppearancePreference;
   fontScale: number;
   bindings: ShortcutBinding[];
+  terminalFont: TerminalFontSettings;
   appVersion: string | null;
   update: AppUpdateInfo | null;
   updatePhase: AppUpdatePhase;
@@ -155,6 +167,8 @@ export function SettingsScreen({
   onCheckForUpdates: () => void;
   onAppearanceChange: (appearance: AppearancePreference) => void;
   onFontScaleChange: (scale: number) => void;
+  onTerminalFontSizeChange: (size: number) => void;
+  onTerminalFontFamilyChange: (preset: string, family?: string) => void;
   onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
   onResetKeybindings: () => void;
   onInstallUpdate: () => void;
@@ -363,6 +377,108 @@ export function SettingsScreen({
                       type="button"
                       disabled={fontScale === DEFAULT_FONT_SCALE}
                       onClick={() => onFontScaleChange(DEFAULT_FONT_SCALE)}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div>
+                    <strong>Terminal font</strong>
+                    <small>
+                      Font family for the terminal. Install the font on this
+                      device first; VINTAGE falls back to the system mono font
+                      when it is missing.
+                    </small>
+                  </div>
+                  <select
+                    className="terminal-font-select"
+                    value={terminalFont.preset}
+                    aria-label="Terminal font family"
+                    onChange={(event) =>
+                      onTerminalFontFamilyChange(event.target.value)
+                    }
+                  >
+                    {TERMINAL_FONT_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {terminalFont.preset === "custom" && (
+                  <div className="settings-row">
+                    <div>
+                      <strong>Custom font name</strong>
+                      <small>
+                        The exact font name as installed on this device, e.g.
+                        "JetBrainsMono Nerd Font".
+                      </small>
+                    </div>
+                    <input
+                      className="terminal-font-input"
+                      type="text"
+                      value={terminalFont.family}
+                      placeholder="Font name"
+                      aria-label="Custom terminal font name"
+                      onChange={(event) =>
+                        onTerminalFontFamilyChange("custom", event.target.value)
+                      }
+                    />
+                  </div>
+                )}
+
+                <div className="settings-row">
+                  <div>
+                    <strong>Terminal font size</strong>
+                    <small>
+                      Text size of the terminal in pixels. The UI scale above
+                      does not affect the terminal.
+                    </small>
+                  </div>
+                  <div
+                    className="font-scale-control"
+                    role="group"
+                    aria-label="Terminal font size"
+                  >
+                    <button
+                      type="button"
+                      aria-label="Decrease terminal font size"
+                      disabled={terminalFont.size <= MIN_TERMINAL_FONT_SIZE}
+                      onClick={() =>
+                        onTerminalFontSizeChange(
+                          terminalFont.size - TERMINAL_FONT_SIZE_STEP,
+                        )
+                      }
+                    >
+                      −
+                    </button>
+                    <span className="font-scale-value" aria-live="polite">
+                      {terminalFont.size}px
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Increase terminal font size"
+                      disabled={terminalFont.size >= MAX_TERMINAL_FONT_SIZE}
+                      onClick={() =>
+                        onTerminalFontSizeChange(
+                          terminalFont.size + TERMINAL_FONT_SIZE_STEP,
+                        )
+                      }
+                    >
+                      +
+                    </button>
+                    <button
+                      className="font-scale-reset"
+                      type="button"
+                      disabled={
+                        terminalFont.size === DEFAULT_TERMINAL_FONT_SIZE
+                      }
+                      onClick={() =>
+                        onTerminalFontSizeChange(DEFAULT_TERMINAL_FONT_SIZE)
+                      }
                     >
                       Reset
                     </button>

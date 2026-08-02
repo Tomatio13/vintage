@@ -25,20 +25,6 @@ export interface PaneLaunchRequest {
   attachToExisting: boolean;
 }
 
-const BASE_TERMINAL_FONT_SIZE = 12;
-
-function readAppFontScale(): number {
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue("--app-font-scale")
-    .trim();
-  const scale = Number(raw);
-  return Number.isFinite(scale) && scale > 0 ? scale : 1;
-}
-
-function terminalFontSizeForScale(scale = readAppFontScale()): number {
-  return Math.max(8, Math.round(BASE_TERMINAL_FONT_SIZE * scale));
-}
-
 const LIGHT_TERMINAL_THEME = {
   background: "#f4f8ff",
   foreground: "#1d2b42",
@@ -99,6 +85,8 @@ export function TerminalSurface({
   paneLaunch,
   restartToken,
   focusRequest,
+  fontFamily,
+  fontSize,
   onInfoChange,
   onStatusChange,
   onScreenState,
@@ -111,6 +99,10 @@ export function TerminalSurface({
   restartToken: number;
   /** Bumped by the owner when keyboard selection should move focus here. */
   focusRequest?: number;
+  /** CSS font-family stack for the terminal surface. */
+  fontFamily: string;
+  /** Terminal font size in pixels. */
+  fontSize: number;
   onInfoChange: (info: TerminalInfo | null) => void;
   onStatusChange: (status: TerminalStatus, message?: string) => void;
   /** Live bottom-buffer screen state, debounced ~120ms after output. */
@@ -174,6 +166,19 @@ export function TerminalSurface({
       terminalInstance.current.options.theme = terminalTheme(appearance);
   }, [appearance]);
 
+  // Apply font family/size changes to a live terminal. xterm re-renders from
+  // these options automatically; no explicit resize is needed.
+  useEffect(() => {
+    const terminal = terminalInstance.current;
+    if (!terminal) return;
+    if (terminal.options.fontFamily !== fontFamily) {
+      terminal.options.fontFamily = fontFamily;
+    }
+    if (terminal.options.fontSize !== fontSize) {
+      terminal.options.fontSize = fontSize;
+    }
+  }, [fontFamily, fontSize]);
+
   useEffect(() => {
     const target = container.current;
     if (!target) return;
@@ -199,8 +204,8 @@ export function TerminalSurface({
       cursorStyle: "bar",
       cursorWidth: 1,
       drawBoldTextInBrightColors: false,
-      fontFamily: '"SFMono-Regular", "SF Mono", Menlo, Consolas, monospace',
-      fontSize: terminalFontSizeForScale(),
+      fontFamily,
+      fontSize,
       fontWeight: 430,
       fontWeightBold: 650,
       letterSpacing: 0.15,
@@ -245,18 +250,6 @@ export function TerminalSurface({
       resizeTimer = window.setTimeout(fit, 90);
     };
     requestFit.current = scheduleFit;
-
-    const syncTerminalFontSize = () => {
-      const next = terminalFontSizeForScale();
-      if (terminal.options.fontSize === next) return;
-      terminal.options.fontSize = next;
-      scheduleFit();
-    };
-    const fontScaleObserver = new MutationObserver(syncTerminalFontSize);
-    fontScaleObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style"],
-    });
 
     const enqueueInput = (data: number[]) => {
       if (!running.current || data.length === 0) return;
@@ -414,7 +407,6 @@ export function TerminalSurface({
       window.clearTimeout(screenTimer);
       window.cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
-      fontScaleObserver.disconnect();
       dataSubscription.dispose();
       binarySubscription.dispose();
       resizeSubscription.dispose();

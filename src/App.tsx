@@ -6,6 +6,7 @@ import "./styles/workspace.css";
 import { useAppearance } from "./appearance";
 import { useFontScale } from "./fontScale";
 import { useKeybindings } from "./settings/keybindings.ts";
+import { resolveTerminalFontFamily, useTerminalFont } from "./terminalFont.ts";
 import { host } from "./host";
 import type { AppUpdateInfo, AppUpdateProgress } from "./host/types";
 import {
@@ -27,6 +28,11 @@ export function App() {
   } = useAppearance();
   const { fontScale, setFontScale } = useFontScale();
   const { bindings, bind, resetAll } = useKeybindings();
+  const {
+    settings: terminalFont,
+    setFontSize,
+    setFontFamily,
+  } = useTerminalFont();
   const overlayTitlebar = usesOverlayTitlebar();
   const [activeView, setActiveView] = useState<AppView>("session");
   const [activeSettingsSection, setActiveSettingsSection] =
@@ -107,10 +113,12 @@ export function App() {
         appearance={resolvedAppearance}
         active={activeView === "session"}
         bindings={bindings}
+        fontFamily={resolveTerminalFontFamily(terminalFont)}
+        fontSize={terminalFont.size}
         onOpenSettings={() => openSettings("application")}
       />
     ),
-    [resolvedAppearance, activeView, bindings],
+    [resolvedAppearance, activeView, bindings, terminalFont],
   );
 
   return (
@@ -139,6 +147,7 @@ export function App() {
               appearance={appearance}
               fontScale={fontScale}
               bindings={bindings}
+              terminalFont={terminalFont}
               appVersion={appVersion}
               update={appUpdate}
               updatePhase={updatePhase}
@@ -148,6 +157,8 @@ export function App() {
               onCheckForUpdates={checkForUpdates}
               onAppearanceChange={setAppearance}
               onFontScaleChange={setFontScale}
+              onTerminalFontSizeChange={setFontSize}
+              onTerminalFontFamilyChange={setFontFamily}
               onBindKey={bind}
               onResetKeybindings={resetAll}
               onInstallUpdate={installUpdate}

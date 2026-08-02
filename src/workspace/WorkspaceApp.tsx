@@ -53,6 +53,8 @@ export function WorkspaceApp({
   appearance,
   active,
   bindings,
+  fontFamily,
+  fontSize,
   onOpenSettings,
 }: {
   appearance: ResolvedAppearance;
@@ -60,6 +62,10 @@ export function WorkspaceApp({
   active: boolean;
   /** User-customizable shortcut bindings; re-registered on change. */
   bindings: ShortcutBinding[];
+  /** CSS font-family stack for terminal surfaces. */
+  fontFamily: string;
+  /** Terminal font size in pixels. */
+  fontSize: number;
   onOpenSettings: () => void;
 }) {
   const {
@@ -464,6 +470,8 @@ export function WorkspaceApp({
           active={active}
           selected={active && tab.selectedPaneId === pane.id}
           appearance={appearance}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
           onStart={handleStartPane}
           onClose={(id) => handleClosePane(workspace.id, tab.id, id)}
           onSplit={(id, direction) => {
