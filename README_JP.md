@@ -7,7 +7,6 @@
   An open-source multi-agent desktop workspace.
 </p>
 
-
 <p align="center">
   <strong>WindowsとLinuxで使える、オープンソースのマルチエージェント・ターミナルワークスペース。</strong>
 </p>
@@ -41,8 +40,8 @@ VINTAGEは、各コーディングエージェントに実ターミナルを割�
 
 - **実ターミナルを使えます。** 各ペインは対話可能なシェルプロセスを持ち、入力、スクロールバック、サイズ変更、再起動、明示的な終了に対応します。
 - **並行作業を整理できます。** タブと再帰的に分割できるペインを使い、同じプロジェクトフォルダで複数のエージェントを動かせます。
-- **対応が必要な作業を見つけられます。** <code>blocked</code>、<code>working</code>、<code>done</code>、<code>idle</code>の活動状態を、ペインからタブ、ワークスペースへ集約します。
-- **セッション再開は開発中です。** ホスト側の再開コマンドと認証付き報告経路はありますが、Hook／Pluginの導入を含む一連の機能はまだ完成していません。
+- **対応が必要な作業を見つけられます。** <code>blocked</code>、<code>working</code>、<code>done</code>、<code>idle</code>の活動状態を、ペインからタブ、ワークスペースへ集約します。画面マニフェスト判定に加え、設定→Integrationsから導入したHook／Plugin報告（OpenCodeプラグインのライフサイクル、Codex／Claudeのセッション識別）が画面判定より優先されます。
+- **セッション再開は開発中です。** ホスト側の再開コマンドと認証付き報告経路はありますが、ネイティブセッション再開はまだエンドツーエンドで対応していません。
 - **作業ファイルをその場で確認できます。** 更新を監視するファイルツリーから、テキスト、ソースコード、画像、PDF、フォントをプレビューできます。
 - **配置だけを復元します。** ワークスペース、タブ、分割、ペイン定義は保存しますが、コマンドを無断で再実行することはありません。
 - **アプリ内で更新できます。** GitHub Releasesで配布される署名付き更新ファイルを、デスクトップアプリからインストールできます。
@@ -55,7 +54,7 @@ VINTAGEは、各コーディングエージェントに実ターミナルを割�
 | ターミナル | 対話可能なシェル、タブ、縦横の再帰分割、境界のサイズ変更、再起動、終了 |
 | シェル | PowerShell 5.1／7、Git Bash、Ubuntuの既定シェル、Bash、Zsh、検証済みのカスタム実行ファイル |
 | エージェント | Grok、Codex、Claude Code、OpenCodeのプリセットと任意のプログラム |
-| 活動状態 | 画面マニフェスト判定は利用可能。Hook／Plugin報告は開発中で、エンドツーエンドではまだ利用できない |
+| 活動状態 | 画面マニフェスト判定に加え、設定→Integrationsから導入したHook／Plugin報告が画面判定より優先される |
 | 再開 | 新しいシェルとしての再起動は利用可能。ネイティブセッション再開は開発中 |
 | ファイル | 隠しファイル表示、ファイルマネージャー操作、テキスト、画像、PDF、フォントのプレビュー |
 | 画面配置 | <code>workspace-layouts.json</code>へ保存。破損時はバックアップ後に初期化可能 |
@@ -71,12 +70,12 @@ VINTAGEは、コンピューターにインストール済みのエージェン�
 
 利用するエージェントを各公式手順でインストールし、<code>PATH</code>から実行できることを確認します。
 
-~~~bash
+```bash
 grok --version      # Grok Build
 codex --version     # OpenAI Codex
 claude --version    # Claude Code
 opencode --version  # OpenCode
-~~~
+```
 
 VINTAGEはエージェントCLIを同梱せず、ログイン処理も代行しません。認証情報は各CLIが管理します。
 
@@ -86,36 +85,36 @@ VINTAGEはエージェントCLIを同梱せず、ログイン処理も代行し�
 
 | OS | ダウンロードするファイル | アーキテクチャ |
 | --- | --- | --- |
-| Windows | <code>VINTAGE_*_x64-setup.exe</code> | x86-64 |
+| Windows | <code>VINTAGE\_*_x64-setup.exe</code> | x86-64 |
 | Debian／Ubuntu | <code>VINTAGE_*_amd64.deb</code> | x86-64 |
-| その他のLinux | <code>VINTAGE_*_amd64.AppImage</code> | x86-64 |
+| その他のLinux | <code>VINTAGE_\*\_amd64.AppImage</code> | x86-64 |
 
 #### Windows
 
-<code>VINTAGE_*_x64-setup.exe</code>を実行し、案内に従ってください。Windows版はアプリ内更新用に署名されていますが、Authenticodeによるコード署名はまだありません。そのため、Microsoft Defender SmartScreenに警告が表示される場合があります。続行する前に、取得元が<code>github.com/Tomatio13/vintage</code>であることを確認してください。
+<code>VINTAGE\_\*\_x64-setup.exe</code>を実行し、案内に従ってください。Windows版はアプリ内更新用に署名されていますが、Authenticodeによるコード署名はまだありません。そのため、Microsoft Defender SmartScreenに警告が表示される場合があります。続行する前に、取得元が<code>github.com/Tomatio13/vintage</code>であることを確認してください。
 
 #### Debian／Ubuntu
 
-~~~bash
+```bash
 sudo apt install ./VINTAGE_*_amd64.deb
-~~~
+```
 
 #### その他のLinux
 
-~~~bash
+```bash
 chmod +x VINTAGE_*_amd64.AppImage
 ./VINTAGE_*_amd64.AppImage
-~~~
+```
 
 <code>.sig</code>、<code>.app.tar.gz</code>、<code>latest.json</code>で終わるファイルは自動更新用です。手動インストールでは必要ありません。
 
 ## 使い始める
 
-1. サイドバーの**+**ボタンからプロジェクトフォルダを追加します。
-2. ペインでターミナルを起動します。新しいタブでは、設定した既定のシェルが使われます。
-3. ペインの操作メニューからエージェントを起動するか、ターミナルへ<code>codex</code>、<code>claude</code>、<code>opencode</code>、<code>grok</code>を直接入力します。
-4. ペインを分割して作業を並行させ、サイドバーのバッジから対応が必要なエージェントを探します。
-5. 右側の**Files**を開き、ワークスペースのファイルを参照、プレビューします。
+1. サイドバーの\*\*+\*\*ボタンからプロジェクトフォルダを追加します。
+1. ペインでターミナルを起動します。新しいタブでは、設定した既定のシェルが使われます。
+1. ペインの操作メニューからエージェントを起動するか、ターミナルへ<code>codex</code>、<code>claude</code>、<code>opencode</code>、<code>grok</code>を直接入力します。
+1. ペインを分割して作業を並行させ、サイドバーのバッジから対応が必要なエージェントを探します。
+1. 右側の**Files**を開き、ワークスペースのファイルを参照、プレビューします。
 
 分割境界はキーボードでも操作できます。<kbd>矢印</kbd>キーでサイズを変更し、<kbd>Home</kbd>／<kbd>End</kbd>で端まで移動します。<kbd>Shift</kbd>を押しながら操作すると、変更幅が細かくなります。
 
@@ -123,7 +122,7 @@ VINTAGEの終了時には、すべての擬似端末（PTY）、子プロセス�
 
 ## 仕組み
 
-~~~text
+```text
 Reactレンダラー
       │ 型付けされたTauriコマンドとイベント
       ▼
@@ -131,18 +130,36 @@ Tauri Rustホスト
       │ PTYとHook IPC環境
       ▼
 エージェントCLIを実行するシェルプロセス
-~~~
+```
 
-Reactレンダラーは、プロセスの起動やファイルシステムへの直接アクセスを行いません。シェル検出、実行ファイルの検証、PTYの生成と終了、ワークスペース登録、ファイル監視、プレビューをRustホストが担当します。開発中のHook／Plugin連携についても、ローカルIPCサーバーなどの基盤はRustホストに置いています。
+Reactレンダラーは、プロセスの起動やファイルシステムへの直接アクセスを行いません。シェル検出、実行ファイルの検証、PTYの生成と終了、ワークスペース登録、ファイル監視、プレビューをRustホストが担当します。Hook／Plugin連携の基盤も、ローカルIPCサーバー、トークン検証、資産管理をすべてRustホストに置いています。
 
 各ペインは、検出済みのシェルを実行する実際のPTYです。エージェントはそのシェル内で起動し、終了後は同じシェルへ戻ります。ペインごとの世代番号を使い、以前の起動に属する古いイベントを破棄します。
 
 - PTY状態（starting／running／stopped／exited／error）は、プロセスの稼働状況を表します。
-- エージェント活動状態（unknown／idle／working／blocked／done）は、現在はターミナル末尾の画面判定から決まります。認証付きIPCとエージェント用資産は実装済みですが、導入UI、エージェント設定への登録、エンドツーエンド検証が未完了のため、Hook／Plugin報告は開発中です。
+- エージェント活動状態（unknown／idle／working／blocked／done）は、ターミナル末尾の画面判定と、設定→Integrationsから導入したHook／Plugin報告を組み合わせて決まります。OpenCodeプラグインの報告は画面判定より優先され、Codex／ClaudeのHookはネイティブセッションIDを報告し、サイドバーのペイン行に表示されます。
 
 画面配置は<code>workspace-layouts.json</code>へ保存します。一方で、PTY ID、スクロールバック、Hookトークン、プロンプトなどの実行状態は保存しません。
 
 詳しいレイヤー構成、信頼境界、永続化モデルは、[アーキテクチャガイド](docs/architecture.md)で説明しています。
+
+## エージェントHookの設定（Integrations）
+
+VINTAGEはエージェントの活動状態を2つの情報源から読み取ります。**画面マニフェスト判定**（常時有効）と、任意で**Hook／Plugin報告**（エージェントCLI自身が送る通知）です。報告は画面判定より優先され、エージェントのネイティブセッションIDも届き、サイドバーのペイン行に表示されます。
+
+報告を有効にするには、**設定→Integrations** から各エージェントの管理資産をインストールします。各エージェントに Install／Uninstall ボタンと状態表示があります。
+
+| エージェント | 配置される資産 | 追記される設定 |
+| --- | --- | --- |
+| Codex | `~/.codex/vintage-agent-state.sh`（または `.ps1`） | `~/.codex/hooks.json` の `hooks.SessionStart` ＋ `~/.codex/config.toml` の `[features] hooks = true` |
+| Claude Code | `~/.claude/hooks/vintage-agent-state.sh`（または `.ps1`） | `~/.claude/settings.json` の `hooks.SessionStart`（matcher `*`） |
+| OpenCode | `~/.config/opencode/plugins/vintage-agent-state.js` | なし（プラグイン自動ロード） |
+
+VINTAGEは自分が追加したエントリだけを追加・更新・削除します（管理コマンドは末尾に `# vintage:codex`／`# vintage:claude` という印が付きます）。既存のHook、プラグイン、設定、資格情報は変更しません。VINTAGE管理外の同名ファイルがある場合は **Conflict** と表示され、上書きも削除もしません。
+
+インストール後、ペイン内でエージェントの**新しい対話セッションを開始**してください（Hookはセッション開始時に実行されます）。するとサイドバーのペイン行にネイティブセッションIDが表示されます。報告を止めるには **Uninstall** を押します。管理エントリとスクリプトだけが削除され、あなたの設定は保持されます。
+
+> **注意:** Codexの`codex exec`（非対話）モードでは `SessionStart` Hookは実行されません。セッションIDを見るには対話セッションを使ってください。OpenCodeのプラグインは `opencode run` でも動作します。
 
 ## プライバシーとセキュリティ
 
@@ -164,12 +181,12 @@ Reactレンダラーは、プロセスの起動やファイルシステムへの
 - Rust 1.88以降
 - 手動テストに使用するエージェントCLI
 
-~~~bash
+```bash
 git clone https://github.com/Tomatio13/vintage.git
 cd vintage
 pnpm install
 pnpm tauri dev
-~~~
+```
 
 レンダラーだけを確認する場合は、<code>pnpm dev</code>を実行します。
 
@@ -183,10 +200,10 @@ pnpm tauri dev
 
 ### 検証
 
-~~~bash
+```bash
 pnpm check
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
-~~~
+```
 
 <code>pnpm check</code>は、フロントエンドの型検査とビルド、画面設定、ワークスペース、エージェント状態、Rustのテスト、<code>cargo check</code>を順に実行します。
 
@@ -202,10 +219,10 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 <summary>リリースをビルドして公開する</summary>
 
 1. <code>package.json</code>、<code>src-tauri/Cargo.toml</code>、<code>src-tauri/tauri.conf.json</code>のバージョンを更新します。
-2. レビュー済みのプルリクエストで<code>develop</code>を<code>main</code>へマージするか、<code>main</code>から**Release**ワークフローを手動実行します。
-3. 下書きのGitHub Releaseに生成されたWindows NSIS、Linux AppImage、Debianパッケージを対象OSでテストします。
-4. <code>.sig</code>ファイルと<code>latest.json</code>がアップデーター用ファイルと一致することを確認します。
-5. すべての確認後に下書きを公開します。
+1. レビュー済みのプルリクエストで<code>develop</code>を<code>main</code>へマージするか、<code>main</code>から**Release**ワークフローを手動実行します。
+1. 下書きのGitHub Releaseに生成されたWindows NSIS、Linux AppImage、Debianパッケージを対象OSでテストします。
+1. <code>.sig</code>ファイルと<code>latest.json</code>がアップデーター用ファイルと一致することを確認します。
+1. すべての確認後に下書きを公開します。
 
 ワークフローには<code>TAURI_SIGNING_PRIVATE_KEY</code>が必要です。鍵にパスワードを設定している場合は、<code>TAURI_SIGNING_PRIVATE_KEY_PASSWORD</code>も登録します。秘密鍵はリポジトリの外で保管してください。
 

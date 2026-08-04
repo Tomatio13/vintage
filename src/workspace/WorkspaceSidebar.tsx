@@ -4,9 +4,17 @@
  * urgent workspace (blocked > working > done > idle > unknown).
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { activityLabel } from "./agentState.ts";
+import { LAYOUT_LIMITS } from "./types.ts";
 import { listPaneIds } from "./paneLayout.ts";
 import type { AgentActivity, WorkspaceState } from "./types.ts";
+
+/** Truncates a long native session id for the sidebar badge area. */
+function shortenSessionId(id: string): string {
+  if (id.length <= 10) return id;
+  return `${id.slice(0, 7)}…`;
+}
 
 export interface WorkspaceSidebarProps {
   workspaces: WorkspaceState[];
@@ -14,9 +22,19 @@ export interface WorkspaceSidebarProps {
   paneBadges: Record<string, AgentActivity>;
   tabBadges: Record<string, AgentActivity>;
   errorTabs: ReadonlySet<string>;
+  /** Native session ids reported by hooks, shown next to the pane badge. */
+  paneSessionIds: Record<string, string>;
+  /** Agent CLI name (codex/claude/opencode) reported by a hook for a pane. */
+  paneAgentNames: Record<string, string>;
   onSelectWorkspace: (workspaceId: string) => void;
   onSelectTab: (workspaceId: string, tabId: string) => void;
   onSelectPane: (workspaceId: string, tabId: string, paneId: string) => void;
+  onRenamePane: (
+    workspaceId: string,
+    tabId: string,
+    paneId: string,
+    title: string,
+  ) => void;
   onClosePane: (workspaceId: string, tabId: string, paneId: string) => void;
   onRemoveWorkspace: (workspaceId: string) => void;
   onAddWorkspace: () => void;
@@ -29,15 +47,47 @@ export function WorkspaceSidebar({
   paneBadges,
   tabBadges,
   errorTabs,
+  paneSessionIds,
+  paneAgentNames,
   onSelectWorkspace,
   onSelectTab,
   onSelectPane,
+  onRenamePane,
   onClosePane,
   onRemoveWorkspace,
   onAddWorkspace,
   onOpenSettings,
 }: WorkspaceSidebarProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [editingPaneId, setEditingPaneId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const cancellingEdit = useRef(false);
+
+  function beginRenamePane(
+    workspaceId: string,
+    tabId: string,
+    paneId: string,
+    currentTitle: string,
+  ) {
+    cancellingEdit.current = false;
+    setDraftTitle(currentTitle);
+    setEditingPaneId(paneId);
+    onSelectPane(workspaceId, tabId, paneId);
+  }
+
+  function commitRenamePane(
+    workspaceId: string,
+    tabId: string,
+    paneId: string,
+  ) {
+    if (cancellingEdit.current) {
+      cancellingEdit.current = false;
+      return;
+    }
+    setEditingPaneId(null);
+    const title = draftTitle.trim();
+    if (title) onRenamePane(workspaceId, tabId, paneId, title);
+  }
 
   function toggleCollapsed(workspaceId: string) {
     setCollapsed((current) => {
@@ -149,6 +199,14 @@ export function WorkspaceSidebar({
                               onClick={() =>
                                 onSelectPane(workspace.id, tab.id, paneId)
                               }
+                              onDoubleClick={() =>
+                                beginRenamePane(
+                                  workspace.id,
+                                  tab.id,
+                                  paneId,
+                                  pane?.title ?? "Terminal",
+                                )
+                              }
                               onKeyDown={(event) => {
                                 if (
                                   event.key === "Enter" ||
@@ -163,9 +221,83 @@ export function WorkspaceSidebar({
                                 className="ws-badge"
                                 data-activity={paneBadges[paneId] ?? "unknown"}
                               />
-                              <span className="ws-row-label">
-                                {pane?.title ?? "Terminal"}
-                              </span>
+                              {paneAgentNames[paneId] && (
+                                <span
+                                  className="ws-pane-agent"
+                                  title={`Agent ${paneAgentNames[paneId]}${
+                                    paneSessionIds[paneId]
+                                      ? ` · session ${paneSessionIds[paneId]}`
+                                      : ""
+                                  }`}
+                                >
+                                  {paneAgentNames[paneId]}
+                                </span>
+                              )}
+                              {activityLabel(
+                                paneBadges[paneId] ?? "unknown",
+                              ) && (
+                                <span
+                                  className="ws-pane-state"
+                                  data-activity={paneBadges[paneId]}
+                                >
+                                  {activityLabel(
+                                    paneBadges[paneId] ?? "unknown",
+                                  )}
+                                </span>
+                              )}
+                              {!paneAgentNames[paneId] &&
+                                paneSessionIds[paneId] && (
+                                  <span
+                                    className="ws-pane-session"
+                                    title={`Session ${paneSessionIds[paneId]}`}
+                                  >
+                                    {shortenSessionId(paneSessionIds[paneId])}
+                                  </span>
+                                )}
+                              {editingPaneId === paneId ? (
+                                <input
+                                  className="ws-pane-title-input"
+                                  value={draftTitle}
+                                  aria-label={`Rename pane ${pane?.title ?? paneId}`}
+                                  autoFocus
+                                  maxLength={LAYOUT_LIMITS.maxTitleCodePoints}
+                                  onChange={(event) =>
+                                    setDraftTitle(
+                                      Array.from(event.target.value)
+                                        .slice(
+                                          0,
+                                          LAYOUT_LIMITS.maxTitleCodePoints,
+                                        )
+                                        .join(""),
+                                    )
+                                  }
+                                  onBlur={() =>
+                                    commitRenamePane(
+                                      workspace.id,
+                                      tab.id,
+                                      paneId,
+                                    )
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      event.currentTarget.blur();
+                                    } else if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      cancellingEdit.current = true;
+                                      setEditingPaneId(null);
+                                    }
+                                  }}
+                                  onClick={(event) => event.stopPropagation()}
+                                />
+                              ) : (
+                                <span className="ws-row-label">
+                                  {paneAgentNames[paneId] &&
+                                  pane?.title === "Terminal"
+                                    ? ""
+                                    : (pane?.title ?? "Terminal")}
+                                </span>
+                              )}
                               <button
                                 className="ws-row-close"
                                 type="button"

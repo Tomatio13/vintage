@@ -7,7 +7,6 @@
   An open-source multi-agent desktop workspace.
 </p>
 
-
 <p align="center">
   Run Grok, Codex, Claude Code, and OpenCode side by side in real terminal panes, and follow every agent's progress from one place.
 </p>
@@ -41,8 +40,8 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 
 - **Runs real terminals.** Each pane owns an interactive shell process with scrollback, input, resize, restart, and explicit teardown.
 - **Organizes parallel work.** Tabs and recursively split panes let several agents work inside the same registered project folder.
-- **Surfaces attention.** Agent activity rolls up from pane to tab to workspace as `blocked`, `working`, `done`, or `idle`.
-- **Session resume is under development.** The host-side resume commands and authenticated reporting pipeline exist, but Hook/Plugin setup is not yet exposed as a supported end-to-end feature.
+- **Surfaces attention.** Agent activity rolls up from pane to tab to workspace as `blocked`, `working`, `done`, or `idle`. Screen-manifest detection works today, and Hook/Plugin reports (OpenCode plugin lifecycle, Codex/Claude session identity) take priority over screen detection once installed from Settings → Integrations.
+- **Session resume is under development.** The host-side resume commands and authenticated reporting pipeline exist, but native session resume is not yet a supported end-to-end feature.
 - **Keeps files close.** Browse a live workspace tree and preview text, source, images, PDF documents, and fonts without leaving the app.
 - **Restores placement, not processes.** Workspaces, tabs, splits, and pane definitions survive a restart; commands are never relaunched silently.
 - **Updates in place.** Signed update bundles are delivered through GitHub Releases and installed by the desktop app.
@@ -55,8 +54,8 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 | Terminals | Interactive shell panes with tabs, recursive horizontal/vertical splits, divider resize, restart, and close |
 | Shells | PowerShell 5.1 / 7, Git Bash, Ubuntu default shell, Bash, Zsh, and validated custom executables |
 | Agents | Grok, Codex, Claude Code, and OpenCode presets plus arbitrary custom programs; each runs inside a shell and returns to it when it exits |
-| Activity | Screen-manifest detection (Herdr-ported) rolls sidebar badges up to the workspace. Hook/Plugin reporting is under development and is not yet available as a supported end-to-end feature |
-| Restart | A stopped pane can restart into a fresh shell. Native session resume is under development and depends on the unfinished Hook/Plugin reporting integration |
+| Activity | Screen-manifest detection (Herdr-ported) rolls sidebar badges up to the workspace. Hook/Plugin reporting is installed from Settings → Integrations and takes priority over screen detection once reporting |
+| Restart | A stopped pane can restart into a fresh shell. Native session resume is under development |
 | Workspace files | Live file tree with hidden-file controls, system file-manager actions, and syntax-highlighted text, image, PDF, and font previews |
 | Layout | Placement persists to `workspace-layouts.json`; damaged files stop autosave and offer a back-up-and-reset flow |
 | Updates | Signed in-app updates backed by GitHub Releases |
@@ -145,14 +144,32 @@ The React renderer does not start processes or access the filesystem directly. T
 
 Each pane is a real PTY running a detected shell (PowerShell, Git Bash, Bash, Zsh, or a validated custom executable). Agent presets launch inside that shell and return to it when they exit, so the pane stays interactive. Per-pane generations guard stale host events.
 
-Activity is designed as two separate layers. Screen-manifest detection is available today; the Hook/Plugin reporting path described below is still under development:
+Activity is designed as two separate layers that combine per pane:
 
 - The PTY state (starting / running / stopped / exited / error) tracks the process.
-- Agent activity (unknown / idle / working / blocked / done) currently comes from screen-manifest matching of the live bottom buffer (ported from Herdr). The host-side authenticated IPC and agent assets exist, but installation UI, agent configuration wiring, and end-to-end verification for Hook/Plugin reports are not complete.
+- Agent activity (unknown / idle / working / blocked / done) comes from screen-manifest matching of the live bottom buffer (ported from Herdr) and, once installed from Settings → Integrations, from Hook/Plugin reports. OpenCode's plugin reports lifecycle state and takes priority over screen detection; Codex and Claude hooks report the native session id, which VINTAGE shows in the sidebar pane rows.
 
 Placement persists to `workspace-layouts.json`; runtime state — PTY ids, scrollback, hook tokens, prompts — never does. Quitting VINTAGE stops every PTY, descendant process, file watcher, and hook IPC connection.
 
 For a full layer map, trust boundaries, and patterns you can reuse in other desktop agent clients, see [docs/architecture.md](docs/architecture.md).
+
+## Setting up agent hooks (Integrations)
+
+VINTAGE reads agent activity from two sources: screen-manifest detection (always on) and, optionally, **hook/plugin reports** that the agent CLIs send on their own. Reports take priority over screen detection and also carry the agent's native session id, which VINTAGE shows in the sidebar pane rows.
+
+To enable reports, install the managed hook/plugin for an agent from **Settings → Integrations**. Each agent gets an Install / Uninstall button and a status row.
+
+| Agent | Asset installed | Config entry written |
+| --- | --- | --- |
+| Codex | `~/.codex/vintage-agent-state.sh` (or `.ps1`) | `~/.codex/hooks.json` `hooks.SessionStart` + `~/.codex/config.toml` `[features] hooks = true` |
+| Claude Code | `~/.claude/hooks/vintage-agent-state.sh` (or `.ps1`) | `~/.claude/settings.json` `hooks.SessionStart` (matcher `*`) |
+| OpenCode | `~/.config/opencode/plugins/vintage-agent-state.js` | none — plugins auto-load |
+
+VINTAGE only adds, updates, or removes the entries it owns (each managed command ends in `# vintage:codex` / `# vintage:claude`). Your existing hooks, plugins, settings, and credentials are left untouched. A same-name file that is not managed by VINTAGE is reported as a **Conflict** and is never overwritten.
+
+After installing, start a **new interactive session** of the agent inside a pane (the hook runs on session start). A native session id then appears next to the pane in the sidebar. To stop reporting, use **Uninstall**, which removes the managed entry and script but keeps your configuration.
+
+> **Note:** Codex's `codex exec` (non-interactive) mode does not fire `SessionStart` hooks. Use an interactive session to see the session id. OpenCode's plugin works with `opencode run` as well.
 
 ## Privacy and security
 

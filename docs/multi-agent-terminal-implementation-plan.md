@@ -304,7 +304,7 @@ type PaneLaunchSpec =
   - `src/detect/manifests/`
   - `src/terminal/state.rs`
 
-Herdrは、すべてのHookを同じ強さの情報源として扱っていない。イベントがライフサイクル全体を覆う場合だけ、Hook／Pluginを状態判定の唯一の信頼源にする。xagentもこの分離を採用する。
+Herdrは、すべてのHookを同じ強さの情報源として扱っていない。イベントがライフサイクル全体を覆う場合だけ、Hook／Pluginを状態判定の唯一の信頼源にする。VINTAGEもこの分離を採用する。
 
 ### 状態の二層化
 
@@ -503,21 +503,21 @@ PTYが動いていることと、エージェントが作業中であること�
 
 Integrationは、各CLIへHookまたはPluginを導入し、版数確認、更新、削除を行う機能を指す。
 
-- 管理資産の先頭へ`XAGENT_INTEGRATION_ID=<agent>`と`XAGENT_INTEGRATION_VERSION=1`をコメントとして入れる。
+- 管理資産の先頭へ`VINTAGE_INTEGRATION_ID=<agent>`と`VINTAGE_INTEGRATION_VERSION=1`をコメントとして入れる。
 - Codex
   - ルートは`CODEX_HOME`、未設定時は`~/.codex`とする。
-  - `xagent-agent-state.ps1`または`xagent-agent-state.sh`を配置する。
+  - `vintage-agent-state.ps1`または`vintage-agent-state.sh`を配置する。
   - `hooks.json`の`SessionStart`へ、管理スクリプトを引数`session`で呼ぶエントリを追加する。
   - `config.toml`の`[features] hooks = true`を保証する。他のfeatureは保持する。
   - stdin JSONの`hook_event_name == "SessionStart"`、`session_id`、`transcript_path`を検証し、セッションIDだけを報告する。
 - Claude Code
   - ルートは`CLAUDE_CONFIG_DIR`、未設定時は`~/.claude`とする。
-  - `hooks/xagent-agent-state.ps1`または`hooks/xagent-agent-state.sh`を配置する。
+  - `hooks/vintage-agent-state.ps1`または`hooks/vintage-agent-state.sh`を配置する。
   - `settings.json`の`hooks.SessionStart`へmatcher `*`、timeout 10秒の管理コマンドを追加する。
   - stdin JSONの`hook_event_name == "SessionStart"`、`session_id`、`transcript_path`を検証する。`agent_id`がある子エージェント報告は無視する。
 - OpenCode
   - ルートは`XDG_CONFIG_HOME/opencode`、未設定時は`~/.config/opencode`とする。
-  - `plugins/xagent-agent-state.js`を配置し、他のPluginファイルは変更しない。
+  - `plugins/vintage-agent-state.js`を配置し、他のPluginファイルは変更しない。
   - `session.created`と`session.updated`はセッション識別、`session.status`はidle／working、permission／question要求はblocked、応答とtoolイベントはworking、`session.idle`はidleへ変換する。
   - `parentID`がある子セッションは親ペインのセッションIDを上書きしない。
 - WindowsのHookコマンドは`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script> session`とする。
@@ -847,7 +847,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
 調査基準日と同日のため差分なし。Phase 6 の移植はこれらを正とする。
 
-計画に対する xagent 拡張（非互換ではなく追加）: OpenCode Plugin の `parentID` 子セッション保護、`session.deleted` での権限解放、tool イベント → working 変換、30秒の権限失効、起動後5秒の猶予。実機Pluginにない要素は Phase 7 でこの拡張どおりに実装する。
+計画に対する VINTAGE 拡張（非互換ではなく追加）: OpenCode Plugin の `parentID` 子セッション保護、`session.deleted` での権限解放、tool イベント → working 変換、30秒の権限失効、起動後5秒の猶予。実機Pluginにない要素は Phase 7 でこの拡張どおりに実装する。
 
 ### portable-pty 0.9.0 の境界（クレート実機ソースで確認）
 

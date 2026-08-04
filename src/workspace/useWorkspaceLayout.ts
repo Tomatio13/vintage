@@ -20,6 +20,7 @@ import {
 } from "./paneLayout.ts";
 import { emptyLayoutFile, type WorkspaceLayoutFile } from "./persistence.ts";
 import {
+  normalizePaneTitle,
   normalizeTabTitle,
   type AgentTabState,
   type PaneDefinition,
@@ -56,6 +57,12 @@ export interface UseWorkspaceLayoutResult {
   closeTab: (workspaceId: string, tabId: string) => string[];
   selectTab: (workspaceId: string, tabId: string) => void;
   renameTab: (workspaceId: string, tabId: string, title: string) => void;
+  renamePane: (
+    workspaceId: string,
+    tabId: string,
+    paneId: string,
+    title: string,
+  ) => void;
   splitPane: (request: PaneSplitRequest) => string | null;
   closePane: (workspaceId: string, tabId: string, paneId: string) => string[];
   selectPane: (workspaceId: string, tabId: string, paneId: string) => void;
@@ -293,6 +300,27 @@ export function useWorkspaceLayout(): UseWorkspaceLayoutResult {
     [],
   );
 
+  const renamePane = useCallback(
+    (workspaceId: string, tabId: string, paneId: string, title: string) => {
+      const normalized = normalizePaneTitle(title);
+      if (normalized === null) return;
+      setLayout((current) =>
+        updateTab(current, workspaceId, tabId, (tab) => {
+          if (!tab.panes.some((pane) => pane.id === paneId)) return tab;
+          return {
+            ...tab,
+            panes: tab.panes.map((pane) =>
+              pane.id === paneId && pane.title !== normalized
+                ? { ...pane, title: normalized }
+                : pane,
+            ),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const splitPane = useCallback(
     (request: PaneSplitRequest): string | null => {
       const { workspaceId, tabId, paneId, direction, defaultShellId } = request;
@@ -302,7 +330,9 @@ export function useWorkspaceLayout(): UseWorkspaceLayoutResult {
       if (!tab) return null;
 
       const newPaneId = crypto.randomUUID();
-      if (splitPaneInLayout(tab.layout, paneId, direction, newPaneId) === null) {
+      if (
+        splitPaneInLayout(tab.layout, paneId, direction, newPaneId) === null
+      ) {
         return null;
       }
 
@@ -428,6 +458,7 @@ export function useWorkspaceLayout(): UseWorkspaceLayoutResult {
     closeTab,
     selectTab,
     renameTab,
+    renamePane,
     splitPane,
     closePane,
     selectPane,

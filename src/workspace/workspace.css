@@ -283,6 +283,48 @@ body.is-resizing-ws-panel .ws-panel-resizer::after {
   background: var(--ws-danger);
 }
 
+.ws-pane-session {
+  flex: none;
+  max-width: 70px;
+  overflow: hidden;
+  color: var(--ws-text-dim);
+  font: calc((9px) * var(--app-font-scale)) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.ws-pane-agent {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--ws-accent-soft);
+  color: var(--ws-accent);
+  font: calc((9px) * var(--app-font-scale)) var(--mono);
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.ws-pane-state {
+  flex: none;
+  font: calc((9px) * var(--app-font-scale)) var(--mono);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ws-pane-state[data-activity="working"] {
+  color: var(--ws-accent);
+}
+
+.ws-pane-state[data-activity="blocked"] {
+  color: var(--ws-warning);
+}
+
+.ws-pane-state[data-activity="idle"] {
+  color: var(--ws-text-dim);
+}
+
 @keyframes ws-pulse {
   0%,
   100% {
@@ -402,6 +444,20 @@ body.is-resizing-ws-panel .ws-panel-resizer::after {
   background: var(--ws-panel-raised);
   color: var(--ws-text);
   font: inherit;
+}
+
+.ws-pane-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 1px 5px;
+  border: 1px solid var(--ws-accent);
+  border-radius: 4px;
+  outline: none;
+  background: var(--ws-panel-raised);
+  color: var(--ws-text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .ws-tab[data-selected="true"] {

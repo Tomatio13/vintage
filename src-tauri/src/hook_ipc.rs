@@ -137,7 +137,16 @@ impl HookIpcRuntime {
 
     /// Environment variables for a PTY child that should report hook state.
     /// Returns empty when the IPC has not been initialized.
-    pub(crate) fn child_env(&self, pane_id: &str, generation: u64) -> Vec<(String, String)> {
+    ///
+    /// `agent` names the CLI preset driving this pane (codex / claude /
+    /// opencode), or an empty string for a plain shell or custom program. It
+    /// lets the receiving side match a report to the pane's actual agent.
+    pub(crate) fn child_env(
+        &self,
+        pane_id: &str,
+        generation: u64,
+        agent: &str,
+    ) -> Vec<(String, String)> {
         let token = self.auth_token.lock().unwrap().clone();
         let port = *self.hook_port.lock().unwrap();
         let (Some(token), Some(port)) = (token, port) else {
@@ -148,11 +157,12 @@ impl HookIpcRuntime {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         vec![
-            ("XAGENT_HOOK_ENV".to_string(), "1".to_string()),
-            ("XAGENT_HOOK_PORT".to_string(), port.to_string()),
-            ("XAGENT_HOOK_TOKEN".to_string(), token_hex),
-            ("XAGENT_PANE_ID".to_string(), pane_id.to_string()),
-            ("XAGENT_GENERATION".to_string(), generation.to_string()),
+            ("VINTAGE_HOOK_ENV".to_string(), "1".to_string()),
+            ("VINTAGE_HOOK_PORT".to_string(), port.to_string()),
+            ("VINTAGE_HOOK_TOKEN".to_string(), token_hex),
+            ("VINTAGE_PANE_ID".to_string(), pane_id.to_string()),
+            ("VINTAGE_GENERATION".to_string(), generation.to_string()),
+            ("VINTAGE_AGENT".to_string(), agent.to_string()),
         ]
     }
 }
@@ -179,8 +189,16 @@ fn handle_connection(
     let report: HookReport = serde_json::from_slice(&buffer[..read])
         .map_err(|_| "The hook IPC report is malformed.".to_string())?;
 
+    // The renderer hands the host a raw 32-byte token; child_env injects it
+    // hex-encoded into VINTAGE_HOOK_TOKEN, and the assets echo that hex string
+    // back. Compare the report's hex token against the hex form of the stored
+    // bytes so the two always agree.
     let provided = report.auth_token.clone().unwrap_or_default();
-    if provided.as_bytes() != expected.as_slice() {
+    let expected_hex = expected
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if provided != expected_hex {
         return Err("The hook IPC report has an invalid token.".to_string());
     }
     if report.pane_id.is_empty() || report.pane_id.len() > 128 || report.generation == u64::MAX {
@@ -216,6 +234,7 @@ fn handle_connection(
         Some("blocked") => AgentActivity::Blocked,
         Some("working") => AgentActivity::Working,
         Some("idle") => AgentActivity::Idle,
+        Some("released") => AgentActivity::Unknown,
         Some("unknown") | None => AgentActivity::Unknown,
         Some(_) => return Err("The hook IPC report has an invalid state.".to_string()),
     };
@@ -224,6 +243,10 @@ fn handle_connection(
         _ => ActivitySource::Runtime,
     };
 
+    // A released report clears the pane's agent identity, so the renderer
+    // drops the agent name and session id and falls back to the terminal.
+    let released = report.state.as_deref() == Some("released");
+
     let _ = app.emit(
         "vintage://agent-activity",
         AgentActivityEvent {
@@ -231,6 +254,7 @@ fn handle_connection(
             generation: current_generation,
             activity,
             source,
+            agent: (!released && !report.agent.is_empty()).then_some(report.agent),
             session_id: report.session_id,
         },
     );
@@ -297,5 +321,50 @@ mod tests {
         assert_eq!(report.generation, 3);
         assert_eq!(report.source, "opencode-plugin");
         assert_eq!(report.state.as_deref(), Some("working"));
+    }
+
+    #[test]
+    fn child_env_carries_the_agent_preset_name() {
+        let runtime = HookIpcRuntime::default();
+        runtime.set_token(vec![9_u8; 32]);
+        *runtime.hook_port.lock().unwrap() = Some(54321);
+
+        let env = runtime.child_env("pane-a", 7, "opencode");
+        let mut map: std::collections::HashMap<String, String> = env.into_iter().collect();
+        assert_eq!(map.remove("VINTAGE_AGENT").as_deref(), Some("opencode"));
+        assert_eq!(map.remove("VINTAGE_PANE_ID").as_deref(), Some("pane-a"));
+        assert_eq!(map.remove("VINTAGE_GENERATION").as_deref(), Some("7"));
+        assert_eq!(map.remove("VINTAGE_HOOK_TOKEN"), Some("09".repeat(32)));
+        // A plain shell reports an empty agent name.
+        let shell_env = runtime.child_env("pane-b", 1, "");
+        let shell_map: std::collections::HashMap<String, String> = shell_env.into_iter().collect();
+        assert_eq!(shell_map.get("VINTAGE_AGENT").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn child_env_token_hex_matches_the_expected_hex() {
+        // The asset echoes VINTAGE_HOOK_TOKEN (hex) back as authToken; the
+        // host must compare it against the hex form of the stored bytes.
+        let runtime = HookIpcRuntime::default();
+        let token = vec![0xab, 0xcd, 0xef, 0x12];
+        runtime.set_token(token.clone());
+        *runtime.hook_port.lock().unwrap() = Some(12345);
+
+        let env = runtime.child_env("pane-c", 2, "codex");
+        let injected: std::collections::HashMap<String, String> = env.into_iter().collect();
+        let injected_hex = injected
+            .get("VINTAGE_HOOK_TOKEN")
+            .map(String::as_str)
+            .unwrap();
+
+        let expected_hex = token
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            injected_hex, expected_hex,
+            "injected token must equal hex of stored bytes"
+        );
+        assert_eq!(injected_hex, "abcdef12");
     }
 }

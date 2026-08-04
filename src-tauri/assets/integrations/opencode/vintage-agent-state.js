@@ -1,22 +1,23 @@
-// XAGENT_INTEGRATION_ID=opencode
-// XAGENT_INTEGRATION_VERSION=1
-// Installed by xagent. Reports lifecycle state and session identity to
-// xagent's hook IPC over TCP. Does nothing when the xagent hook environment
+// VINTAGE_INTEGRATION_ID=opencode
+// VINTAGE_INTEGRATION_VERSION=2
+// Installed by VINTAGE. Reports lifecycle state and session identity to
+// VINTAGE's hook IPC over TCP. Does nothing when the VINTAGE hook environment
 // is absent. Reports are serialized so send order is preserved.
 
 import net from "node:net";
 
-const SOURCE = "xagent:opencode";
+const SOURCE = "VINTAGE:opencode";
 let sendChain = Promise.resolve();
 
 function hookEnv() {
-  if (process.env.XAGENT_HOOK_ENV !== "1") return null;
-  const paneId = process.env.XAGENT_PANE_ID;
-  const port = process.env.XAGENT_HOOK_PORT;
-  const token = process.env.XAGENT_HOOK_TOKEN;
-  const generation = process.env.XAGENT_GENERATION;
+  if (process.env.VINTAGE_HOOK_ENV !== "1") return null;
+  const paneId = process.env.VINTAGE_PANE_ID;
+  const port = process.env.VINTAGE_HOOK_PORT;
+  const token = process.env.VINTAGE_HOOK_TOKEN;
+  const generation = process.env.VINTAGE_GENERATION;
+  const agent = process.env.VINTAGE_AGENT || "opencode";
   if (!paneId || !port || !token || !generation) return null;
-  return { paneId, port, token, generation: Number(generation) };
+  return { paneId, port, token, generation: Number(generation), agent };
 }
 
 function sessionIdFromProperties(properties) {
@@ -32,8 +33,8 @@ function reportState(state, sessionID) {
   const params = {
     paneId: env.paneId,
     generation: env.generation,
-    source: "opencode-plugin",
-    agent: "opencode",
+    source: `${env.agent}-plugin`,
+    agent: env.agent,
     ...(state ? { state } : {}),
     ...(sessionID ? { sessionId: sessionID } : {}),
     authToken: env.token,
@@ -62,7 +63,7 @@ function reportState(state, sessionID) {
   return sendChain;
 }
 
-export const XagentAgentStatePlugin = async () => {
+export const VintageAgentStatePlugin = async () => {
   if (!hookEnv()) return {};
 
   return {
@@ -72,7 +73,7 @@ export const XagentAgentStatePlugin = async () => {
     event: async ({ event }) => {
       const type = event?.type;
       const properties = event?.properties ?? {};
-      const sessionID = sessionIDFromProperties(properties);
+      const sessionID = sessionIdFromProperties(properties);
 
       switch (type) {
         case "permission.asked":

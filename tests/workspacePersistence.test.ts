@@ -7,6 +7,7 @@ import {
   validateLayoutFileValue,
 } from "../src/workspace/persistence.ts";
 import {
+  normalizePaneTitle,
   normalizeTabTitle,
   type PaneDefinition,
   type PaneLayout,
@@ -56,6 +57,13 @@ test("normalizeTabTitle trims valid names and rejects unusable names", () => {
   assert.equal(normalizeTabTitle("   "), null);
   assert.equal(normalizeTabTitle("🚀".repeat(128)), "🚀".repeat(128));
   assert.equal(normalizeTabTitle("🚀".repeat(129)), null);
+});
+
+test("normalizePaneTitle applies the same rules as tab titles", () => {
+  assert.equal(normalizePaneTitle("  Codex  "), "Codex");
+  assert.equal(normalizePaneTitle("   "), null);
+  assert.equal(normalizePaneTitle("🚀".repeat(128)), "🚀".repeat(128));
+  assert.equal(normalizePaneTitle("🚀".repeat(129)), null);
 });
 
 test("emptyLayoutFile is version 1 with no workspaces", () => {

@@ -7,6 +7,7 @@ import { useAppearance } from "./appearance";
 import { useFontScale } from "./fontScale";
 import { useKeybindings } from "./settings/keybindings.ts";
 import { useDefaultShell } from "./settings/shells.ts";
+import { useIntegrations } from "./settings/integrations.ts";
 import { resolveTerminalFontFamily, useTerminalFont } from "./terminalFont.ts";
 import { host } from "./host";
 import type { ShellDescriptor } from "./host/types";
@@ -36,6 +37,7 @@ export function App() {
     setFontFamily,
   } = useTerminalFont();
   const { preferredShellId, setPreferredShellId } = useDefaultShell();
+  const integrations = useIntegrations();
   const overlayTitlebar = usesOverlayTitlebar();
   const [shells, setShells] = useState<ShellDescriptor[]>([]);
   const [activeView, setActiveView] = useState<AppView>("session");
@@ -183,6 +185,12 @@ export function App() {
               onBindKey={bind}
               onResetKeybindings={resetAll}
               onInstallUpdate={installUpdate}
+              integrations={integrations.integrations}
+              integrationActionError={integrations.actionError}
+              onIntegrationInstall={(agent) => void integrations.install(agent)}
+              onIntegrationUninstall={(agent) =>
+                void integrations.uninstall(agent)
+              }
             />
           </main>
         </>

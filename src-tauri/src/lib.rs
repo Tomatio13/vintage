@@ -460,7 +460,7 @@ fn agent_list_presets() -> Vec<terminal::AgentPresetInfo> {
 }
 
 #[tauri::command]
-fn integration_list() -> Vec<Result<integrations::IntegrationStatus, String>> {
+fn integration_list() -> Vec<integrations::IntegrationStatus> {
     use integrations::IntegrationAgent;
     [
         IntegrationAgent::Codex,
@@ -468,7 +468,14 @@ fn integration_list() -> Vec<Result<integrations::IntegrationStatus, String>> {
         IntegrationAgent::Opencode,
     ]
     .into_iter()
-    .map(integrations::status)
+    .map(|agent| {
+        integrations::status(agent).unwrap_or_else(|message| integrations::IntegrationStatus {
+            agent,
+            state: integrations::IntegrationState::Conflict,
+            script_path: None,
+            message,
+        })
+    })
     .collect()
 }
 

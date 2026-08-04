@@ -10,6 +10,8 @@ import {
 import type {
   AppUpdateInfo,
   AppUpdateProgress,
+  IntegrationAgent,
+  IntegrationStatus,
   ShellDescriptor,
 } from "../host/types";
 import {
@@ -22,6 +24,8 @@ import {
 } from "../terminalFont.ts";
 import type { AppUpdatePhase } from "../update/types";
 import { Icon } from "../ui/Icon";
+import { integrationAgentLabel } from "./integrations.ts";
+import type { IntegrationState } from "../host/types";
 import {
   formatShortcutKey,
   SHORTCUT_ACTION_LABELS,
@@ -31,7 +35,8 @@ import {
   type ShortcutKey,
 } from "../workspace/shortcuts.ts";
 
-export type SettingsSection = "application" | "appearance" | "keybindings";
+export type SettingsSection =
+  "application" | "appearance" | "keybindings" | "integrations";
 
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
@@ -47,6 +52,11 @@ const SETTINGS_SECTIONS: Array<{
     id: "appearance",
     label: "Appearance",
     description: "Theme and text size on this device",
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    description: "Hook and plugin assets for agent CLIs",
   },
   {
     id: "keybindings",
@@ -158,6 +168,10 @@ export function SettingsScreen({
   onBindKey,
   onResetKeybindings,
   onInstallUpdate,
+  integrations,
+  integrationActionError,
+  onIntegrationInstall,
+  onIntegrationUninstall,
 }: {
   overlayTitlebar: boolean;
   section: SettingsSection;
@@ -182,6 +196,10 @@ export function SettingsScreen({
   onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
   onResetKeybindings: () => void;
   onInstallUpdate: () => void;
+  integrations: IntegrationStatus[] | null;
+  integrationActionError: string | null;
+  onIntegrationInstall: (agent: IntegrationAgent) => void;
+  onIntegrationUninstall: (agent: IntegrationAgent) => void;
 }) {
   const checkingForUpdates = updatePhase === "checking";
   const updating = updatePhase === "downloading";
@@ -527,6 +545,15 @@ export function SettingsScreen({
             </section>
           )}
 
+          {section === "integrations" && (
+            <IntegrationsSection
+              integrations={integrations}
+              actionError={integrationActionError}
+              onInstall={onIntegrationInstall}
+              onUninstall={onIntegrationUninstall}
+            />
+          )}
+
           {section === "keybindings" && (
             <KeybindingsSection
               bindings={bindings}
@@ -537,6 +564,116 @@ export function SettingsScreen({
         </div>
       </div>
     </div>
+  );
+}
+
+function integrationStateLabel(state: IntegrationState): string {
+  switch (state) {
+    case "not_installed":
+      return "Not installed";
+    case "installed":
+      return "Installed";
+    case "outdated":
+      return "Outdated";
+    case "conflict":
+      return "Conflict";
+  }
+}
+
+/**
+ * Integrations settings: one row per agent CLI showing whether its managed
+ * hook/plugin asset is installed, where it lives, and install/uninstall
+ * controls. A same-name file without the managed marker is reported as a
+ * conflict and is never overwritten.
+ */
+function IntegrationsSection({
+  integrations,
+  actionError,
+  onInstall,
+  onUninstall,
+}: {
+  integrations: IntegrationStatus[] | null;
+  actionError: string | null;
+  onInstall: (agent: IntegrationAgent) => void;
+  onUninstall: (agent: IntegrationAgent) => void;
+}) {
+  return (
+    <section
+      className="settings-card"
+      aria-labelledby="integrations-settings-title"
+    >
+      <header>
+        <div>
+          <h2 id="integrations-settings-title">Integrations</h2>
+          <p>
+            Hook and plugin assets that report agent state to VINTAGE. Files are
+            managed by VINTAGE and never overwrite your own configuration.
+          </p>
+        </div>
+      </header>
+
+      {actionError && (
+        <p className="settings-inline-notice" role="alert">
+          {actionError}
+        </p>
+      )}
+
+      <div className="settings-list">
+        {integrations === null && (
+          <div className="settings-row">
+            <div>
+              <strong>Loading integrations…</strong>
+              <small>Reading hook and plugin status from the host.</small>
+            </div>
+          </div>
+        )}
+        {integrations?.map((integration) => (
+          <div className="settings-row" key={integration.agent}>
+            <div>
+              <strong className="integration-agent-name">
+                {integrationAgentLabel(integration.agent)}
+              </strong>
+              <small>
+                CLI{" "}
+                <span className="integration-agent-id">
+                  {integration.agent}
+                </span>
+                {" · "}
+                {integration.scriptPath ?? "No managed asset installed."}
+              </small>
+              {integration.state === "conflict" && (
+                <small className="settings-inline-warning">
+                  A non-managed file exists at this location. VINTAGE will not
+                  overwrite it.
+                </small>
+              )}
+            </div>
+            <span
+              className="settings-value integration-state-badge"
+              data-state={integration.state}
+            >
+              {integrationStateLabel(integration.state)}
+            </span>
+            {integration.state === "installed" ? (
+              <button
+                type="button"
+                onClick={() => onUninstall(integration.agent)}
+              >
+                Uninstall
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={integration.state === "conflict"}
+                onClick={() => onInstall(integration.agent)}
+              >
+                {integration.state === "outdated" ? "Update" : "Install"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -77,6 +77,7 @@ pub(crate) enum AgentActivity {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ActivitySource {
     Screen,
+    #[serde(rename = "opencode-plugin")]
     OpencodePlugin,
     Runtime,
 }
@@ -88,6 +89,8 @@ pub(crate) struct AgentActivityEvent {
     pub(crate) generation: u64,
     pub(crate) activity: AgentActivity,
     pub(crate) source: ActivitySource,
+    /// The CLI preset a hook/plugin report belongs to, or None for screen.
+    pub(crate) agent: Option<String>,
     pub(crate) session_id: Option<String>,
 }
 
@@ -355,8 +358,14 @@ pub(crate) fn terminal_start(
         command.env(key, value);
     }
     // Hook IPC connection info goes to the PTY child's environment only; the
-    // renderer never sees it after the token was handed to the host.
-    for (key, value) in hook_runtime.child_env(&pane_id, generation) {
+    // renderer never sees it after the token was handed to the host. The
+    // agent preset name lets the hook and the receiver match a report to the
+    // CLI actually driving this pane.
+    let agent_name = match &launch {
+        workspaces::PaneLaunchSpec::Agent { preset, .. } => preset.as_str(),
+        _ => "",
+    };
+    for (key, value) in hook_runtime.child_env(&pane_id, generation, agent_name) {
         command.env(key, value);
     }
 
@@ -529,6 +538,7 @@ pub(crate) fn agent_report_screen_state(
             generation: current_generation,
             activity,
             source: ActivitySource::Screen,
+            agent: None,
             session_id: None,
         },
     );
@@ -537,7 +547,7 @@ pub(crate) fn agent_report_screen_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{terminal_size, validate_terminal_id, MAX_TERMINAL_DIMENSION};
+    use super::{terminal_size, validate_terminal_id, ActivitySource, MAX_TERMINAL_DIMENSION};
 
     #[test]
     fn accepts_safe_terminal_identifiers() {
@@ -551,5 +561,16 @@ mod tests {
         assert!(terminal_size(80, 24).is_ok());
         assert!(terminal_size(1, 24).is_err());
         assert!(terminal_size(80, MAX_TERMINAL_DIMENSION + 1).is_err());
+    }
+
+    #[test]
+    fn activity_source_serializes_to_the_frontend_contract() {
+        // The renderer's AgentActivityEvent.source type is
+        // "screen" | "opencode-plugin" | "runtime". OpencodePlugin must
+        // serialize with the hyphen; a lowercase rename would emit
+        // "opencodeplugin" and the renderer would drop the report.
+        let source = ActivitySource::OpencodePlugin;
+        let value = serde_json::to_string(&source).expect("serializes");
+        assert_eq!(value, "\"opencode-plugin\"");
     }
 }

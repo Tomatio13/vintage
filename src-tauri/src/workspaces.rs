@@ -331,6 +331,17 @@ pub(crate) enum AgentPreset {
     Opencode,
 }
 
+impl AgentPreset {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            AgentPreset::Grok => "grok",
+            AgentPreset::Codex => "codex",
+            AgentPreset::Claude => "claude",
+            AgentPreset::Opencode => "opencode",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",

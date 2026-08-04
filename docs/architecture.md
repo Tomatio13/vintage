@@ -15,7 +15,7 @@ ______________________________________________________________________
 | エージェント実行環境 | 各 CLI（Grok / Codex / Claude Code / OpenCode）を検出済みシェル内で起動 |
 | 端末 | `portable-pty` による PTY。xterm.js が描画 |
 | 永続化 | ワークスペース登録（`working-directories.json`）と配置（`workspace-layouts.json`）のみ |
-| 状態判定 | 画面マニフェスト照合（Herdr移植）。Hook／Plugin 報告は開発中 |
+| 状態判定 | 画面マニフェスト照合（Herdr移植）と、Settings → Integrations で導入する Hook／Plugin 報告。後者が画面判定より優先 |
 
 **設計意図:** UI は **投影（projection）と操作面** に徹する。プロセス起動、ファイルシステム、資格情報、エージェント CLI は **Rust ホストだけ** が持つ。
 
@@ -204,7 +204,10 @@ ______________________________________________________________________
 
 - プリセット（Grok／Codex／Claude／OpenCode）は CLI 名で PATH 解決し、resume フラグ（`codex resume`／`claude --resume`／`opencode --session`）に対応。未検出でもプロファイル内 PATH を考慮して起動操作は許可し、spawn 失敗時に英語エラー。
 - 画面判定は xterm.js の **ライブ下端 80 論理行**（スクロール位置や古い履歴は使わない）を、Herdr から移植したマニフェストで照合。`contains` は case-insensitive、`(?i)/(?m)` と `\u{...}` は JS 正規表現へ変換。
-- **開発中:** Codex／Claude HookのセッションID報告とOpenCode Pluginの活動状態報告は、ホスト側IPCと資産まで実装済み。導入UI、エージェント設定への登録、実CLIを使ったエンドツーエンド検証は未完了。現在利用できる状態判定は画面マニフェスト照合。
+- **Hook／Plugin報告:** Settings → Integrations から管理資産を導入すると、OpenCode Pluginの活動状態報告（`opencode-plugin`）とCodex／Claude HookのセッションID報告（`runtime`、`state` なし）が `vintage://agent-activity` で届く。レンダラは source を判定し、`opencode-plugin`／`runtime` 報告を画面判定より優先してバッジへ反映する。セッションIDはサイドバーのペイン行に表示され、`session.deleted` などで `state` なし報告が来ると画面判定へ戻る。
+  - Codexのインストールは `config.toml` の `[features] hooks = true` を保証し、`hooks.json` の `SessionStart` に管理エントリを追加する。**`codex exec`（非対話）ではSessionStartフックは実行されない**（実機確認済み）。フックは対話セッションでのみ発火する。
+  - Claudeのインストールは `settings.json` の `hooks.SessionStart`（matcher `*`、timeout 10秒）に管理エントリを追加する。
+  - OpenCodeは `plugins/vintage-agent-state.js` の配置だけで自動ロードされ、`opencode run` でライフサイクル報告が届く（実機確認済み）。
 - 集約優先順位は `blocked > working > done > idle > unknown`。PTY `error` は blocked 相当＋別バッジ。
 
 ______________________________________________________________________

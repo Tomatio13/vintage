@@ -55,6 +55,13 @@ export type AgentActivity = "unknown" | "idle" | "working" | "blocked" | "done";
 /** Activity values external sources can report. `done` is derived, never reported. */
 export type ReportedActivity = Exclude<AgentActivity, "done">;
 
+/**
+ * Where an activity report came from. Screen manifests are renderer-derived;
+ * hooks and plugins report over the host IPC. OpenCode plugin reports take
+ * priority over screen detection.
+ */
+export type ActivitySource = "screen" | "opencode-plugin" | "runtime";
+
 export type AgentPreset = "grok" | "codex" | "claude" | "opencode";
 
 export type ShellKind =
@@ -110,11 +117,21 @@ export function countCodePoints(value: string): number {
   return Array.from(value).length;
 }
 
-/** Trims and validates a user-editable tab title before persistence. */
-export function normalizeTabTitle(value: string): string | null {
+/** Trims and validates a user-editable title before persistence. */
+function normalizeTitle(value: string): string | null {
   const title = value.trim();
   if (!title || countCodePoints(title) > LAYOUT_LIMITS.maxTitleCodePoints) {
     return null;
   }
   return title;
+}
+
+/** Trims and validates a user-editable tab title before persistence. */
+export function normalizeTabTitle(value: string): string | null {
+  return normalizeTitle(value);
+}
+
+/** Trims and validates a user-editable pane title before persistence. */
+export function normalizePaneTitle(value: string): string | null {
+  return normalizeTitle(value);
 }

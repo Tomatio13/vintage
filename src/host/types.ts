@@ -55,6 +55,8 @@ export interface AgentActivityEvent {
   generation: number;
   activity: Exclude<AgentActivity, "done">;
   source: "screen" | "opencode-plugin" | "runtime";
+  /** The CLI preset the reporting hook/plugin belongs to, e.g. "codex". */
+  agent: string | null;
   sessionId: string | null;
 }
 

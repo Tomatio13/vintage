@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   ACTIVITY_PRIORITY,
   acknowledgeDone,
+  activityFromSources,
+  activityLabel,
   aggregateActivities,
   applyActivityReport,
   applyPtyTransition,
@@ -10,8 +12,9 @@ import {
   initialPaneActivityState,
   maxActivity,
   rollupPaneStatuses,
+  shouldAcceptHookReport,
 } from "../src/workspace/agentState.ts";
-import type { AgentActivity } from "../src/workspace/types.ts";
+import type { AgentActivity, ActivitySource } from "../src/workspace/types.ts";
 
 const ALL_ACTIVITIES: AgentActivity[] = [
   "unknown",
@@ -224,4 +227,42 @@ test("rollup of running panes follows the attention priority", () => {
     activity: "unknown",
     hasPtyError: false,
   });
+});
+
+test("only hook and plugin sources are accepted over the activity channel", () => {
+  const accepted: ActivitySource[] = ["opencode-plugin", "runtime"];
+  const rejected: ActivitySource[] = ["screen"];
+  for (const source of accepted) {
+    assert.equal(shouldAcceptHookReport(source), true);
+  }
+  for (const source of rejected) {
+    assert.equal(shouldAcceptHookReport(source), false);
+  }
+});
+
+test("hook reports override screen detection for the pane badge", () => {
+  // A plugin report takes priority even when the screen says something else.
+  assert.equal(activityFromSources("working", "blocked"), "blocked");
+  assert.equal(activityFromSources("idle", "working"), "working");
+  assert.equal(activityFromSources("blocked", "idle"), "idle");
+});
+
+test("a pane without a hook report keeps its screen activity", () => {
+  assert.equal(activityFromSources("working", undefined), "working");
+  assert.equal(activityFromSources("working", null), "working");
+  // Session-identity-only reports (Codex/Claude) carry no state: screen wins.
+  assert.equal(activityFromSources("working", null), "working");
+});
+
+test("a pane with neither source resolves to unknown", () => {
+  assert.equal(activityFromSources(undefined, undefined), "unknown");
+  assert.equal(activityFromSources(undefined, null), "unknown");
+});
+
+test("activityLabel maps states to human labels and hides the rest", () => {
+  assert.equal(activityLabel("working"), "Thinking");
+  assert.equal(activityLabel("blocked"), "Blocked");
+  assert.equal(activityLabel("idle"), "Idle");
+  assert.equal(activityLabel("unknown"), null);
+  assert.equal(activityLabel("done"), null);
 });

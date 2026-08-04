@@ -11,11 +11,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ResolvedAppearance } from "../appearance";
 import { host } from "../host/index.ts";
-import type { ShellDescriptor, WorkspaceRootRecord } from "../host/types.ts";
+import type {
+  AgentActivityEvent,
+  ShellDescriptor,
+  WorkspaceRootRecord,
+} from "../host/types.ts";
 import {
+  activityFromSources,
   applyActivityReport,
   effectiveActivity,
   rollupPaneStatuses,
+  shouldAcceptHookReport,
 } from "./agentState.ts";
 import { listPaneIds, type SplitPath } from "./paneLayout.ts";
 import {
@@ -44,11 +50,33 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar.tsx";
 import { WorkspaceTabs } from "./WorkspaceTabs.tsx";
 import type {
   AgentActivity,
+  AgentPreset,
   PtyState,
   ReportedActivity,
   WorkspaceState,
 } from "./types.ts";
 import "./workspace.css";
+
+/**
+ * Quiet period after the last hook report before a pane decays from
+ * working/blocked to idle. Codex/Claude have no response-complete hook event,
+ * so this approximates "thinking finished".
+ */
+const IDLE_DECAY_MS = 8000;
+
+/** The agent preset driving a pane, or null for a plain shell / custom run. */
+function paneAgentForId(
+  paneId: string,
+  workspaces: WorkspaceState[],
+): AgentPreset | null {
+  for (const workspace of workspaces) {
+    for (const tab of workspace.tabs) {
+      const pane = tab.panes.find((candidate) => candidate.id === paneId);
+      if (pane) return pane.agentKind;
+    }
+  }
+  return null;
+}
 
 export function WorkspaceApp({
   appearance,
@@ -82,6 +110,7 @@ export function WorkspaceApp({
     closeTab,
     selectTab,
     renameTab,
+    renamePane,
     splitPane,
     closePane,
     selectPane,
@@ -94,9 +123,28 @@ export function WorkspaceApp({
   const [runtimes, setRuntimes] = useState<PaneRuntimeMap>({});
   const runtimesRef = useRef(runtimes);
   runtimesRef.current = runtimes;
+  /**
+   * Idle timers per pane: Codex/Claude have no response-complete hook event,
+   * so a working/blocked report decays to idle after a quiet period.
+   */
+  const idleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
   const [activities, setActivities] = useState<
     Record<string, ReportedActivity>
   >({});
+  /** Hook/plugin-reported activity, which overrides screen detection. */
+  const [hookActivities, setHookActivities] = useState<
+    Record<string, ReportedActivity>
+  >({});
+  /** Native session id reported by a hook; shown in the sidebar when set. */
+  const [paneSessionIds, setPaneSessionIds] = useState<Record<string, string>>(
+    {},
+  );
+  /** Agent CLI name a hook reported for a pane (codex, claude, opencode). */
+  const [paneAgentNames, setPaneAgentNames] = useState<Record<string, string>>(
+    {},
+  );
   /** Hidden panes that finished working while hidden raise a `done` badge. */
   const [donePending, setDonePending] = useState<Record<string, boolean>>({});
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
@@ -128,6 +176,10 @@ export function WorkspaceApp({
   // when the entire terminal workspace unmounts.
   useEffect(
     () => () => {
+      for (const timer of idleTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      idleTimersRef.current.clear();
       for (const runtime of Object.values(runtimesRef.current)) {
         if (
           runtime.terminalId &&
@@ -330,6 +382,103 @@ export function WorkspaceApp({
     [activities, donePending, isPaneVisible, runtimes],
   );
 
+  // Host hook/plugin reports (opencode-plugin / runtime). Screen-derived
+  // reports are echoed back through the same channel by the host, so they are
+  // ignored here — the renderer already folded them into `activities` via
+  // `handleActivityChange`. Hook reports override screen detection for the
+  // badge while keeping the screen value, and carry a native session id shown
+  // in the sidebar.
+  const handleActivityEvent = useCallback(
+    (event: AgentActivityEvent) => {
+      const { paneId, generation, activity, source, agent, sessionId } = event;
+      if (!shouldAcceptHookReport(source)) return;
+      const runtime = runtimes[paneId];
+      if (!runtime || runtime.generation !== generation) return;
+      // A shell pane (agentKind null) accepts any hook's report — the hook
+      // names the CLI it belongs to (Herdr-style). An explicit agent pane only
+      // accepts matching reports so a hook can never paint a pane it does not
+      // drive.
+      if (agent) {
+        const paneAgent = paneAgentForId(paneId, workspaces);
+        if (paneAgent !== null && paneAgent !== agent) return;
+      }
+      const visible = isPaneVisible(paneId);
+      const previous = activities[paneId] ?? "unknown";
+      const nextState = applyActivityReport(
+        {
+          ptyState: "running",
+          activity: previous,
+          donePending: donePending[paneId] ?? false,
+        },
+        activity,
+        visible,
+      );
+      setDonePending((pending) =>
+        pending[paneId] === nextState.donePending
+          ? pending
+          : { ...pending, [paneId]: nextState.donePending },
+      );
+      // Manage the idle decay timer. working/blocked arms a timeout that
+      // flips the pane to idle after a quiet period; idle/released clears it.
+      const timers = idleTimersRef.current;
+      const existing = timers.get(paneId);
+      if (existing) {
+        clearTimeout(existing);
+        timers.delete(paneId);
+      }
+      if (agent && (activity === "working" || activity === "blocked")) {
+        timers.set(
+          paneId,
+          setTimeout(() => {
+            // Only decay if the pane is still alive and still owned by the
+            // same agent generation.
+            const runtime = runtimesRef.current[paneId];
+            if (!runtime || runtime.generation !== generation) return;
+            timers.delete(paneId);
+            setHookActivities((current) => {
+              if (!(paneId in current)) return current;
+              return { ...current, [paneId]: "idle" };
+            });
+          }, IDLE_DECAY_MS),
+        );
+      }
+      setHookActivities((current) => {
+        // A released report (no agent) clears the hook activity so the pane
+        // falls back to screen detection.
+        if (!agent) {
+          if (!(paneId in current)) return current;
+          const next = { ...current };
+          delete next[paneId];
+          return next;
+        }
+        if (current[paneId] === activity) return current;
+        return { ...current, [paneId]: activity };
+      });
+      setPaneSessionIds((current) => {
+        const next = { ...current };
+        if (sessionId) next[paneId] = sessionId;
+        else delete next[paneId];
+        return next;
+      });
+      setPaneAgentNames((current) => {
+        const next = { ...current };
+        if (agent) next[paneId] = agent;
+        else delete next[paneId];
+        return next;
+      });
+    },
+    [activities, donePending, isPaneVisible, runtimes, workspaces],
+  );
+
+  // Fold hook/plugin activity reports into the pane badges. The listener is
+  // torn down on unmount so a restarted workspace does not double-subscribe.
+  useEffect(() => {
+    const unlisten = host.terminal.onActivity(handleActivityEvent);
+    return () => {
+      void unlisten.then((dispose) => dispose());
+    };
+  }, [handleActivityEvent]);
+
   const stopPanePty = useCallback((paneId: string) => {
     setRuntimes((current) => {
       const runtime = current[paneId];
@@ -426,7 +575,10 @@ export function WorkspaceApp({
           selectedWorkspace.selectedTabId === tab.id;
         const inputs = tab.panes.map((pane) => {
           const runtime = paneRuntimeOrStopped(runtimes, pane.id);
-          const activity = activities[pane.id] ?? "unknown";
+          const activity = activityFromSources(
+            activities[pane.id],
+            hookActivities[pane.id],
+          );
           const pending = donePending[pane.id] ?? false;
           paneBadges[pane.id] =
             runtime.ptyState === "error"
@@ -451,7 +603,14 @@ export function WorkspaceApp({
       }
     }
     return { paneBadges, tabBadges, errorTabs };
-  }, [workspaces, runtimes, activities, donePending, selectedWorkspace]);
+  }, [
+    workspaces,
+    runtimes,
+    activities,
+    hookActivities,
+    donePending,
+    selectedWorkspace,
+  ]);
 
   function renderPaneFor(workspace: WorkspaceState, tabId: string) {
     return (paneId: string) => {
@@ -507,6 +666,8 @@ export function WorkspaceApp({
         paneBadges={paneBadges}
         tabBadges={tabBadges}
         errorTabs={errorTabs}
+        paneSessionIds={paneSessionIds}
+        paneAgentNames={paneAgentNames}
         onSelectWorkspace={setSelectedWorkspaceId}
         onSelectPane={(workspaceId, tabId, paneId) => {
           // Viewing a pane acknowledges any pending done badge.
@@ -515,6 +676,7 @@ export function WorkspaceApp({
           );
           selectPane(workspaceId, tabId, paneId);
         }}
+        onRenamePane={renamePane}
         onSelectTab={(workspaceId, tabId) => {
           setSelectedWorkspaceId(workspaceId);
           selectTab(workspaceId, tabId);

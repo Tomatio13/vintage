@@ -12,7 +12,12 @@
  * normally) raises `done` until the user views it.
  */
 
-import type { AgentActivity, PtyState, ReportedActivity } from "./types.ts";
+import type {
+  AgentActivity,
+  ActivitySource,
+  PtyState,
+  ReportedActivity,
+} from "./types.ts";
 
 /**
  * Rollup priority: blocked > working > done > idle > unknown.
@@ -132,6 +137,46 @@ export function effectiveActivity(
 ): AgentActivity {
   if (state.donePending && !visible) return "done";
   return state.activity;
+}
+
+/**
+ * Reports from a hook/plugin are only trusted for `opencode-plugin` and
+ * `runtime`. Screen-derived reports travel the `agent_report_screen_state`
+ * path; an echoed `screen` source on the activity channel is ignored to avoid
+ * re-processing the renderer's own report.
+ */
+export function shouldAcceptHookReport(source: ActivitySource): boolean {
+  return source === "opencode-plugin" || source === "runtime";
+}
+
+/**
+ * Combines the screen-derived activity with the latest hook/plugin report for
+ * a pane. Hook reports take priority over screen detection; a pane with no
+ * hook report (or a session-identity-only report that carries no state) keeps
+ * its screen activity.
+ */
+export function activityFromSources(
+  screen: ReportedActivity | undefined,
+  hook: ReportedActivity | null | undefined,
+): ReportedActivity {
+  return hook ?? screen ?? "unknown";
+}
+
+/**
+ * Human label for a pane's activity shown in the sidebar, or null for states
+ * with no label (unknown / done).
+ */
+export function activityLabel(activity: AgentActivity): string | null {
+  switch (activity) {
+    case "working":
+      return "Thinking";
+    case "blocked":
+      return "Blocked";
+    case "idle":
+      return "Idle";
+    default:
+      return null;
+  }
 }
 
 export interface PaneRollupInput {
