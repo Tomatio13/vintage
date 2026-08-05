@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  ghostty-web@0.4.0: 4556de2be106840bf93823384f26a4521348888a0dd1e0e9ab2375a496643665
+
 importers:
 
   .:
@@ -16,7 +19,7 @@ importers:
         version: 2.11.1
       ghostty-web:
         specifier: ^0.4.0
-        version: 0.4.0
+        version: 0.4.0(patch_hash=4556de2be106840bf93823384f26a4521348888a0dd1e0e9ab2375a496643665)
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
@@ -1180,7 +1183,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  ghostty-web@0.4.0: {}
+  ghostty-web@0.4.0(patch_hash=4556de2be106840bf93823384f26a4521348888a0dd1e0e9ab2375a496643665): {}
 
   hast-util-to-jsx-runtime@2.3.6:
     dependencies:

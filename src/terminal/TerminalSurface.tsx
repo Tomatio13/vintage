@@ -207,6 +207,10 @@ export function TerminalSurface({
       cursorStyle: "bar",
       fontFamily,
       fontSize,
+      // Slightly taller rows than the font's raw bounding box so accent marks,
+      // CJK glyphs and prompt symbols (❯, #, $) are never clipped at the top
+      // or bottom of a row. ghostty-web defaults to 1 (font height + 2px).
+      lineHeight: 1.1,
       scrollback: 5000,
       theme: terminalTheme(appearance),
     });

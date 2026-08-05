@@ -1,0 +1,83 @@
+diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
+index a4ca427b95288e70c782ce303013cd644893dcec..42ce0dfbecf28767db94d3dcbdbab5b8355af636 100644
+--- a/dist/ghostty-web.js
++++ b/dist/ghostty-web.js
+@@ -1338,7 +1338,7 @@ class $ {
+     const g = A.getContext("2d", { alpha: !0 });
+     if (!g)
+       throw new Error("Failed to get 2D rendering context");
+-    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
++    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.lineHeight = B.lineHeight ?? 1, this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
+       this.theme.black,
+       this.theme.red,
+       this.theme.green,
+@@ -1363,7 +1363,7 @@ class $ {
+   measureFont() {
+     const B = document.createElement("canvas").getContext("2d");
+     B.font = `${this.fontSize}px ${this.fontFamily}`;
+-    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1;
++    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil((C + I) * this.lineHeight) + 2, i = Math.ceil(C) + 1;
+     return { width: E, height: D, baseline: i };
+   }
+   /**
+@@ -1628,6 +1628,12 @@ class $ {
+   setFontFamily(A) {
+     this.fontFamily = A, this.metrics = this.measureFont();
+   }
++  /**
++   * Update line height multiplier
++   */
++  setLineHeight(A) {
++    this.lineHeight = A, this.metrics = this.measureFont();
++  }
+   /**
+    * Update cursor style
+    */
+@@ -2206,7 +2212,8 @@ class IA {
+       allowTransparency: A.allowTransparency ?? !1,
+       convertEol: A.convertEol ?? !1,
+       disableStdin: A.disableStdin ?? !1,
+-      smoothScrollDuration: A.smoothScrollDuration ?? 100
++      smoothScrollDuration: A.smoothScrollDuration ?? 100,
++      lineHeight: A.lineHeight ?? 1
+       // Default: 100ms smooth scroll
+     };
+     this.options = new Proxy(B, {
+@@ -2241,6 +2248,9 @@ class IA {
+         case "fontFamily":
+           this.renderer && (this.renderer.setFontFamily(this.options.fontFamily), this.handleFontChange());
+           break;
++        case "lineHeight":
++          this.renderer && (this.renderer.setLineHeight(this.options.lineHeight), this.handleFontChange());
++          break;
+         case "cols":
+         case "rows":
+           this.resize(this.options.cols, this.options.rows);
+@@ -2338,6 +2348,7 @@ class IA {
+       }), this.renderer = new $(this.canvas, {
+         fontSize: this.options.fontSize,
+         fontFamily: this.options.fontFamily,
++        lineHeight: this.options.lineHeight,
+         cursorStyle: this.options.cursorStyle,
+         cursorBlink: this.options.cursorBlink,
+         theme: this.options.theme
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..2a0917cbe5e56fe39f04cc62a5f5c96b043f3fd0 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -891,6 +891,7 @@ export declare interface ITerminalOptions {
+     scrollback?: number;
+     fontSize?: number;
+     fontFamily?: string;
++    lineHeight?: number;
+     allowTransparency?: boolean;
+     convertEol?: boolean;
+     disableStdin?: boolean;
+@@ -1261,6 +1262,7 @@ export declare class OSC8LinkProvider implements ILinkProvider {
+ export declare interface RendererOptions {
+     fontSize?: number;
+     fontFamily?: string;
++    lineHeight?: number;
+     cursorStyle?: 'block' | 'underline' | 'bar';
+     cursorBlink?: boolean;
+     theme?: ITheme;
