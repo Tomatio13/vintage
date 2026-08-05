@@ -13,6 +13,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::shells::decode_powershell_script;
+#[cfg(windows)]
+use crate::shells::encode_powershell_script;
 use serde_json::Value;
 
 // Reserved for version-diff Outdated detection against the marker header.
@@ -285,31 +288,46 @@ fn managed_hook_command(agent: IntegrationAgent, home: &Path, action: &str) -> S
     let script = script_file_name();
     let root = config_root_with_home(agent, home).unwrap_or_default();
     let marker = format!("{}:{}:{}", CONFIG_MARKER, agent.as_str(), action);
-    match agent {
-        IntegrationAgent::Codex => {
-            format!(
-                "{} '{}' {}  {}",
-                shell_launcher(),
-                root.join(&script).display(),
-                action,
-                marker
-            )
-        }
-        IntegrationAgent::Claude => {
-            format!(
-                "{} '{}/hooks/{}' session  {}",
-                shell_launcher(),
-                root.display(),
-                script,
-                marker
-            )
-        }
-        IntegrationAgent::Opencode => String::new(),
+    let script_path = match agent {
+        IntegrationAgent::Codex => root.join(&script),
+        IntegrationAgent::Claude => root.join("hooks").join(&script),
+        IntegrationAgent::Opencode => return String::new(),
+    };
+    hook_command(&script_path, action, &marker)
+}
+
+/// The managed hook command that runs `script_path` with `action`. On Unix the
+/// launcher takes the script path and action as shell words; on Windows the
+/// whole invocation is base64-encoded (`-EncodedCommand`) so quoting cannot be
+/// mangled by the agent's hook shell — cmd.exe for Codex, Git Bash or
+/// PowerShell for Claude Code.
+fn hook_command(script_path: &Path, action: &str, marker: &str) -> String {
+    #[cfg(windows)]
+    {
+        let payload = format!("& '{}' '{}'  {}", script_path.display(), action, marker);
+        format!(
+            "{} {}",
+            shell_launcher(),
+            encode_powershell_script(&payload)
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        format!(
+            "{} '{}' {}  {}",
+            shell_launcher(),
+            script_path.display(),
+            action,
+            marker
+        )
     }
 }
 
 /// Codex hook events and the state action each reports. SessionStart carries
-/// the native session id; the rest report a state.
+/// the native session id; the rest report a state. `Stop` fires at the end of
+/// every turn, so it maps to `idle` — it marks "thinking finished", not a pane
+/// release. `SessionEnd` fires once when the session terminates, so it maps to
+/// `released`, which clears the pane's agent identity.
 const CODEX_HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session"),
     ("UserPromptSubmit", "working"),
@@ -317,19 +335,19 @@ const CODEX_HOOK_EVENTS: &[(&str, &str)] = &[
     ("PostToolUse", "working"),
     ("PermissionRequest", "blocked"),
     ("SessionEnd", "released"),
-    ("Stop", "released"),
+    ("Stop", "idle"),
 ];
 
-/// Claude Code hook events and the state action each reports. Same mapping
-/// as Codex; Claude Code has no PermissionRequest event, so blocked is not
-/// wired here.
+/// Claude Code hook events and the state action each reports. Same mapping as
+/// Codex; Claude Code has no PermissionRequest event, so blocked is not wired
+/// here.
 const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session"),
     ("UserPromptSubmit", "working"),
     ("PreToolUse", "working"),
     ("PostToolUse", "working"),
     ("SessionEnd", "released"),
-    ("Stop", "released"),
+    ("Stop", "idle"),
 ];
 
 /// The shell that runs the hook script, by absolute path so the managed
@@ -337,8 +355,11 @@ const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
 fn shell_launcher() -> &'static str {
     #[cfg(windows)]
     {
-        // PowerShell 5.1+ has powershell.exe; the managed .ps1 runs via -File.
-        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File"
+        // Hook commands are executed by the agent's own hook runner. Codex
+        // runs them via `cmd.exe /C`; Claude Code via Git Bash or PowerShell.
+        // `-EncodedCommand` takes a base64 payload that contains no quotes or
+        // spaces, so the command survives every one of those shells.
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand"
     }
     #[cfg(not(windows))]
     {
@@ -516,18 +537,34 @@ fn entry_contains_marker(entry: &Value, marker: &str) -> bool {
     hooks.iter().any(|hook| {
         hook.get("command")
             .and_then(Value::as_str)
-            .map(|cmd| {
-                // Match the exact per-event marker (`# vintage:<agent>:<action>`),
-                // or the bare per-agent marker (`# vintage:<agent>`) from earlier
-                // versions so upgrades can clean up legacy entries too. The
-                // `marker` argument is a full command, so extract the agent
-                // suffix rather than re-deriving a prefix from it.
-                cmd.contains(marker)
-                    || (cmd.contains(CONFIG_MARKER)
-                        && cmd.contains(&format!(":{}", agent_marker_suffix(marker))))
-            })
+            .map(|cmd| command_contains_marker(cmd, marker))
             .unwrap_or(false)
     })
+}
+
+/// True when a managed command string matches the marker. Matches the exact
+/// per-event marker (`# vintage:<agent>:<action>`), the bare per-agent marker
+/// (`# vintage:<agent>`) from earlier versions, and — on Windows — the marker
+/// inside the `-EncodedCommand` base64 payload, so legacy upgrades can clean
+/// up entries created before the encoded form. The `marker` argument is a full
+/// command, so extract the agent suffix rather than re-deriving a prefix from
+/// it.
+fn command_contains_marker(command: &str, marker: &str) -> bool {
+    // Windows `-EncodedCommand`: the trailing token is a base64 payload whose
+    // decoded text carries the marker.
+    let encoded = command
+        .split(' ')
+        .next_back()
+        .filter(|part| !part.is_empty());
+    if let Some(decoded) = encoded.and_then(decode_powershell_script) {
+        if decoded.contains(marker) {
+            return true;
+        }
+    }
+    // Unix and legacy `-File` forms carry the marker directly in the command.
+    command.contains(marker)
+        || (command.contains(CONFIG_MARKER)
+            && command.contains(&format!(":{}", agent_marker_suffix(marker))))
 }
 
 /// The `<agent>` suffix of a managed marker, e.g. `codex` for a marker that
@@ -763,11 +800,14 @@ mod tests {
                 .as_array()
                 .expect("SessionStart list");
             assert_eq!(session_start.len(), 1, "exactly one managed entry");
+            let command = session_start[0]["hooks"][0]["command"]
+                .as_str()
+                .expect("command");
             assert!(
-                session_start[0]["hooks"][0]["command"]
-                    .as_str()
-                    .expect("command")
-                    .contains(CONFIG_MARKER),
+                command_contains_marker(
+                    command,
+                    &format!("{}:{}:{}", CONFIG_MARKER, "codex", "session")
+                ),
                 "managed entry carries the marker"
             );
 
@@ -807,9 +847,9 @@ mod tests {
                     .unwrap_or_else(|| panic!("missing {event}"));
                 assert_eq!(list.len(), 1, "{event} should have one managed entry");
                 let command = list[0]["hooks"][0]["command"].as_str().expect("command");
-                let marker = format!("# vintage:codex:{}", action);
+                let marker = format!("{}:{}:{}", CONFIG_MARKER, "codex", action);
                 assert!(
-                    command.contains(&marker),
+                    command_contains_marker(command, &marker),
                     "{event} command should carry its marker: {command}"
                 );
                 assert!(
@@ -845,9 +885,9 @@ mod tests {
                     .unwrap_or_else(|| panic!("missing {event}"));
                 assert_eq!(list.len(), 1, "{event} should have one managed entry");
                 let command = list[0]["hooks"][0]["command"].as_str().expect("command");
-                let marker = format!("# vintage:claude:{}", action);
+                let marker = format!("{}:{}:{}", CONFIG_MARKER, "claude", action);
                 assert!(
-                    command.contains(&marker),
+                    command_contains_marker(command, &marker),
                     "{event} command should carry its marker: {command}"
                 );
             }
@@ -885,6 +925,93 @@ mod tests {
             let doc: Value = serde_json::from_str(&fs::read_to_string(&config).expect("config"))
                 .expect("valid json");
             assert_eq!(doc, Value::Object(Default::default()));
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn encoded_windows_command_carries_the_marker_in_its_payload() {
+        // The Windows managed command base64-encodes the whole invocation. The
+        // marker must still be found inside the encoded payload so install
+        // dedup, uninstall, and status checks locate the managed entry.
+        let command = hook_command(
+            &Path::new(r"C:\Users\me\.codex\vintage-agent-state.ps1"),
+            "working",
+            "# vintage:codex:working",
+        );
+        assert!(
+            command
+                .starts_with("powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand "),
+            "Windows command uses -EncodedCommand: {command}"
+        );
+        assert!(
+            command_contains_marker(&command, "# vintage:codex:working"),
+            "marker must be found inside the encoded payload: {command}"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_command_carries_the_marker_directly() {
+        let command = hook_command(
+            &Path::new("/home/me/.codex/vintage-agent-state.sh"),
+            "working",
+            "# vintage:codex:working",
+        );
+        assert!(
+            command_contains_marker(&command, "# vintage:codex:working"),
+            "Unix command carries the marker directly: {command}"
+        );
+    }
+
+    #[test]
+    fn legacy_bare_agent_markers_are_still_detected() {
+        // Entries from earlier versions carried only `# vintage:<agent>` with
+        // no action suffix. A per-event marker lookup must still locate them.
+        let legacy = "/bin/sh 'x' session  # vintage:codex";
+        assert!(
+            command_contains_marker(legacy, "# vintage:codex:session"),
+            "legacy bare marker matches a session lookup"
+        );
+        assert!(
+            command_contains_marker(legacy, "# vintage:codex:working"),
+            "legacy bare marker matches a working lookup"
+        );
+        assert!(
+            !command_contains_marker(legacy, "# vintage:claude:session"),
+            "another agent's marker never matches"
+        );
+    }
+
+    #[test]
+    fn encoded_windows_command_unwires_on_uninstall() {
+        with_temp_home(|home| {
+            let script = script_path_with_home(IntegrationAgent::Codex, home).expect("path");
+            fs::create_dir_all(script.parent().expect("parent")).expect("dir");
+            fs::write(&script, codex_script()).expect("script");
+
+            // Simulate a Windows-style encoded command wired into hooks.json.
+            let command = hook_command(&script, "session", "# vintage:codex:session");
+            let doc = serde_json::json!({
+                "hooks": {
+                    "SessionStart": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": command,
+                            "timeout": 10
+                        }]
+                    }]
+                }
+            });
+            let config = config_root_with_home(IntegrationAgent::Codex, home)
+                .expect("root")
+                .join("hooks.json");
+            fs::write(&config, serde_json::to_vec_pretty(&doc).expect("json")).expect("write");
+
+            unwire_config(IntegrationAgent::Codex, home).expect("unwire");
+            let after: Value = serde_json::from_str(&fs::read_to_string(&config).expect("config"))
+                .expect("valid json");
+            assert_eq!(after, Value::Object(Default::default()));
         });
     }
 
@@ -928,9 +1055,12 @@ mod tests {
             let managed = session_start
                 .iter()
                 .find(|entry| {
-                    entry["hooks"][0]["command"]
-                        .as_str()
-                        .is_some_and(|c| c.contains(CONFIG_MARKER))
+                    entry["hooks"][0]["command"].as_str().is_some_and(|c| {
+                        command_contains_marker(
+                            c,
+                            &format!("{}:{}:{}", CONFIG_MARKER, "claude", "session"),
+                        )
+                    })
                 })
                 .expect("managed entry present");
             assert_eq!(

@@ -19,14 +19,14 @@ if (-not $env:VINTAGE_PANE_ID) { exit 0 }
 $agent = if ($env:VINTAGE_AGENT) { $env:VINTAGE_AGENT } else { "claude" }
 
 try {
-    $input = [Console]::In.ReadToEnd()
+    $hookInput = [Console]::In.ReadToEnd()
 } catch {
     exit 0
 }
-if (-not $input.Trim()) { exit 0 }
+if (-not $hookInput.Trim()) { exit 0 }
 
 try {
-    $hook = $input | ConvertFrom-Json
+    $hook = $hookInput | ConvertFrom-Json
 } catch {
     exit 0
 }
