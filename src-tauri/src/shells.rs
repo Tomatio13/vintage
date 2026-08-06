@@ -23,13 +23,19 @@ pub(crate) const SHELL_ID_WINDOWS_PWSH: &str = "windows-pwsh";
 pub(crate) const SHELL_ID_WINDOWS_POWERSHELL: &str = "windows-powershell";
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const SHELL_ID_WINDOWS_GIT_BASH: &str = "windows-git-bash";
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const SHELL_ID_WINDOWS_GIT_BASH_FAST: &str = "windows-git-bash-fast";
 // Unix-only ids; referenced by cross-platform tests, unused on Windows builds.
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_DEFAULT: &str = "unix-default";
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_BASH: &str = "unix-bash";
 #[cfg_attr(windows, allow(dead_code))]
+pub(crate) const SHELL_ID_UNIX_BASH_FAST: &str = "unix-bash-fast";
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_ZSH: &str = "unix-zsh";
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) const SHELL_ID_UNIX_ZSH_FAST: &str = "unix-zsh-fast";
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) const SHELL_ID_UNIX_PWSH: &str = "unix-pwsh";
 
@@ -234,6 +240,12 @@ pub(crate) fn detect_windows_shells(input: &ShellDetectionInput<'_>) -> Vec<Shel
         SHELL_ID_WINDOWS_GIT_BASH,
         "Git Bash",
         ShellKind::GitBash,
+        git_bash_path.clone(),
+    ));
+    shells.push(windows_descriptor(
+        SHELL_ID_WINDOWS_GIT_BASH_FAST,
+        "Git Bash (fast startup)",
+        ShellKind::GitBash,
         git_bash_path,
     ));
     shells
@@ -344,6 +356,12 @@ pub(crate) fn detect_unix_shells(input: &ShellDetectionInput<'_>) -> Vec<ShellDe
         SHELL_ID_UNIX_BASH,
         "Bash",
         ShellKind::Bash,
+        bash_path.clone(),
+    ));
+    shells.push(unix_descriptor(
+        SHELL_ID_UNIX_BASH_FAST,
+        "Bash (fast startup)",
+        ShellKind::Bash,
         bash_path,
     ));
 
@@ -351,6 +369,12 @@ pub(crate) fn detect_unix_shells(input: &ShellDetectionInput<'_>) -> Vec<ShellDe
     shells.push(unix_descriptor(
         SHELL_ID_UNIX_ZSH,
         "Zsh",
+        ShellKind::Zsh,
+        zsh_path.clone(),
+    ));
+    shells.push(unix_descriptor(
+        SHELL_ID_UNIX_ZSH_FAST,
+        "Zsh (fast startup)",
         ShellKind::Zsh,
         zsh_path,
     ));
@@ -473,8 +497,24 @@ fn resolved_from_descriptor(descriptor: ShellDescriptor) -> ResolvedShell {
             env.insert("CHERE_INVOKING".to_string(), "1".to_string());
             env.insert("TERM".to_string(), "xterm-256color".to_string());
             env.insert("COLORTERM".to_string(), "truecolor".to_string());
-            vec!["--login".to_string(), "-i".to_string()]
+            if uses_fast_bash_startup(&descriptor) {
+                vec![
+                    "--noprofile".to_string(),
+                    "--norc".to_string(),
+                    "-i".to_string(),
+                ]
+            } else {
+                vec!["--login".to_string(), "-i".to_string()]
+            }
         }
+        ShellKind::Bash if uses_fast_bash_startup(&descriptor) => {
+            vec![
+                "--noprofile".to_string(),
+                "--norc".to_string(),
+                "-i".to_string(),
+            ]
+        }
+        ShellKind::Zsh if uses_fast_zsh_startup(&descriptor) => vec!["-f".to_string()],
         _ => Vec::new(),
     };
     ResolvedShell {
@@ -513,10 +553,15 @@ pub(crate) fn agent_wrapper_command(
                 encode_powershell_script(&script),
             ]
         }
-        ShellKind::GitBash | ShellKind::Bash | ShellKind::Zsh | ShellKind::Posix => {
+        ShellKind::GitBash | ShellKind::Bash | ShellKind::Posix => {
             env.insert("TERM".to_string(), "xterm-256color".to_string());
             env.insert("COLORTERM".to_string(), "truecolor".to_string());
-            bash_agent_arguments(agent_argv)
+            bash_agent_arguments(agent_argv, uses_fast_bash_startup(&descriptor))
+        }
+        ShellKind::Zsh => {
+            env.insert("TERM".to_string(), "xterm-256color".to_string());
+            env.insert("COLORTERM".to_string(), "truecolor".to_string());
+            zsh_agent_arguments(agent_argv, uses_fast_zsh_startup(&descriptor))
         }
         ShellKind::Custom => {
             // The custom executable is treated as a shell that already knows
@@ -538,6 +583,14 @@ pub(crate) fn agent_wrapper_command(
         args,
         env,
     }
+}
+
+fn uses_fast_bash_startup(descriptor: &ShellDescriptor) -> bool {
+    descriptor.id == SHELL_ID_WINDOWS_GIT_BASH_FAST || descriptor.id == SHELL_ID_UNIX_BASH_FAST
+}
+
+fn uses_fast_zsh_startup(descriptor: &ShellDescriptor) -> bool {
+    descriptor.id == SHELL_ID_UNIX_ZSH_FAST
 }
 
 /// Host-side executable validation: a regular file, executable on Unix, and
@@ -584,20 +637,54 @@ pub(crate) fn posix_quote(argument: &str) -> String {
     format!("'{}'", argument.replace('\'', "'\\''"))
 }
 
-/// Arguments for an interactive login bash that runs the agent argv and then
-/// returns to a fresh bash in the same pane.
-pub(crate) fn bash_agent_arguments(agent_argv: &[String]) -> Vec<String> {
+/// Arguments for an interactive Bash that runs the agent argv and then returns
+/// to the same startup mode in the pane.
+pub(crate) fn bash_agent_arguments(agent_argv: &[String], fast_startup: bool) -> Vec<String> {
     let joined = agent_argv
         .iter()
         .map(|argument| posix_quote(argument))
         .collect::<Vec<_>>()
         .join(" ");
-    vec![
-        "--login".to_string(),
-        "-i".to_string(),
-        "-c".to_string(),
-        format!("{joined}; exec bash --login -i"),
-    ]
+    if fast_startup {
+        vec![
+            "--noprofile".to_string(),
+            "--norc".to_string(),
+            "-i".to_string(),
+            "-c".to_string(),
+            format!("{joined}; exec bash --noprofile --norc -i"),
+        ]
+    } else {
+        vec![
+            "--login".to_string(),
+            "-i".to_string(),
+            "-c".to_string(),
+            format!("{joined}; exec bash --login -i"),
+        ]
+    }
+}
+
+/// Arguments for an interactive Zsh that returns to its selected startup mode.
+pub(crate) fn zsh_agent_arguments(agent_argv: &[String], fast_startup: bool) -> Vec<String> {
+    let joined = agent_argv
+        .iter()
+        .map(|argument| posix_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if fast_startup {
+        vec![
+            "-f".to_string(),
+            "-i".to_string(),
+            "-c".to_string(),
+            format!("{joined}; exec zsh -f -i"),
+        ]
+    } else {
+        vec![
+            "-l".to_string(),
+            "-i".to_string(),
+            "-c".to_string(),
+            format!("{joined}; exec zsh -l -i"),
+        ]
+    }
 }
 
 /// PowerShell single-quote literal: backticks are not special inside single
@@ -641,12 +728,14 @@ pub(crate) fn decode_powershell_script(encoded: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        bash_agent_arguments, decode_powershell_script, detect_unix_shells, detect_windows_shells,
-        encode_powershell_script, git_root_has_git_exe, passwd_login_shell_from, posix_quote,
-        powershell_agent_script, powershell_quote, resolve_custom_shell, resolve_shell,
-        validate_shell_executable, ShellDescriptor, ShellDetectionInput, ShellKind,
-        SHELL_ID_UNIX_BASH, SHELL_ID_UNIX_DEFAULT, SHELL_ID_WINDOWS_DEFAULT,
-        SHELL_ID_WINDOWS_GIT_BASH, SHELL_ID_WINDOWS_POWERSHELL, SHELL_ID_WINDOWS_PWSH,
+        agent_wrapper_command, bash_agent_arguments, decode_powershell_script, detect_unix_shells,
+        detect_windows_shells, encode_powershell_script, git_root_has_git_exe,
+        passwd_login_shell_from, posix_quote, powershell_agent_script, powershell_quote,
+        resolve_custom_shell, resolve_shell, validate_shell_executable, zsh_agent_arguments,
+        ShellDescriptor, ShellDetectionInput, ShellKind, SHELL_ID_UNIX_BASH,
+        SHELL_ID_UNIX_BASH_FAST, SHELL_ID_UNIX_DEFAULT, SHELL_ID_UNIX_ZSH_FAST,
+        SHELL_ID_WINDOWS_DEFAULT, SHELL_ID_WINDOWS_GIT_BASH, SHELL_ID_WINDOWS_GIT_BASH_FAST,
+        SHELL_ID_WINDOWS_POWERSHELL, SHELL_ID_WINDOWS_PWSH,
     };
     use base64::Engine as _;
     use std::{
@@ -852,6 +941,34 @@ mod tests {
     }
 
     #[test]
+    fn fast_unix_bash_skips_profile_and_rc_files_for_shells_and_agents() {
+        let host = FakeHost::new().bin("bash", "/bin/bash");
+        let shells = host.with_input(detect_unix_shells);
+        let resolved = resolve_shell(&shells, SHELL_ID_UNIX_BASH_FAST).expect("fast Bash resolves");
+        assert_eq!(resolved.args, vec!["--noprofile", "--norc", "-i"]);
+
+        let wrapper = agent_wrapper_command(resolved.descriptor, &["codex".to_string()]);
+        assert_eq!(wrapper.args[0..3], ["--noprofile", "--norc", "-i"]);
+        assert_eq!(wrapper.args[4], "'codex'; exec bash --noprofile --norc -i");
+    }
+
+    #[test]
+    fn fast_unix_zsh_skips_startup_files_for_shells_and_agents() {
+        let host = FakeHost::new().bin("zsh", "/usr/bin/zsh");
+        let shells = host.with_input(detect_unix_shells);
+        let resolved = resolve_shell(&shells, SHELL_ID_UNIX_ZSH_FAST).expect("fast Zsh resolves");
+        assert_eq!(resolved.args, vec!["-f"]);
+
+        let wrapper = agent_wrapper_command(resolved.descriptor, &["codex".to_string()]);
+        assert_eq!(wrapper.args[0..3], ["-f", "-i", "-c"]);
+        assert_eq!(wrapper.args[3], "'codex'; exec zsh -f -i");
+        assert_eq!(
+            zsh_agent_arguments(&["codex".to_string()], false)[3],
+            "'codex'; exec zsh -l -i"
+        );
+    }
+
+    #[test]
     fn passwd_parser_reads_the_shell_field() {
         let content = "root:x:0:0:root:/root:/bin/bash\nme:x:1000:1000:Me:/home/me:/usr/bin/zsh\n";
         assert_eq!(
@@ -908,13 +1025,28 @@ mod tests {
             "run with space".to_string(),
             "it's".to_string(),
         ];
-        let args = bash_agent_arguments(&argv);
+        let args = bash_agent_arguments(&argv, false);
         assert_eq!(args[0], "--login");
         assert_eq!(args[1], "-i");
         assert_eq!(args[2], "-c");
         assert_eq!(
             args[3],
             "'codex' 'run with space' 'it'\\''s'; exec bash --login -i"
+        );
+    }
+
+    #[test]
+    fn fast_bash_agent_arguments_skip_profile_and_rc_files() {
+        let args = bash_agent_arguments(&["codex".to_string()], true);
+        assert_eq!(
+            args,
+            vec![
+                "--noprofile",
+                "--norc",
+                "-i",
+                "-c",
+                "'codex'; exec bash --noprofile --norc -i",
+            ]
         );
     }
 
@@ -984,6 +1116,18 @@ mod tests {
             resolved.env.get("TERM").map(String::as_str),
             Some("xterm-256color")
         );
+    }
+
+    #[test]
+    fn fast_git_bash_resolution_skips_profile_and_rc_files() {
+        let host = FakeHost::new()
+            .env("ProgramFiles", "C:/Program Files")
+            .file("C:/Program Files/Git/bin/bash.exe");
+        let shells = host.with_input(detect_windows_shells);
+        let resolved =
+            resolve_shell(&shells, SHELL_ID_WINDOWS_GIT_BASH_FAST).expect("fast Git Bash resolves");
+        assert_eq!(resolved.args, vec!["--noprofile", "--norc", "-i"]);
+        assert_eq!(resolved.descriptor.label, "Git Bash (fast startup)");
     }
 
     #[cfg(unix)]

@@ -40,7 +40,7 @@ export function integrationAgentLabel(agent: IntegrationAgent): string {
   }
 }
 
-export function useIntegrations() {
+export function useIntegrations(enabled: boolean) {
   const [integrations, setIntegrations] = useState<IntegrationStatus[] | null>(
     null,
   );
@@ -56,8 +56,9 @@ export function useIntegrations() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   const install = useCallback(
     async (agent: IntegrationAgent) => {

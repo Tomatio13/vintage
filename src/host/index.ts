@@ -103,10 +103,15 @@ export const host = {
         ...workspaceFilePayload(target),
         path,
       }),
-    watch: (target: WorkspaceFileTarget, watchId: string) =>
+    watch: (
+      target: WorkspaceFileTarget,
+      watchId: string,
+      paths: readonly string[],
+    ) =>
       command<void>("workspace_watch", {
         ...workspaceFilePayload(target),
         watchId,
+        paths,
       }),
     unwatch: (watchId: string) =>
       command<void>("workspace_unwatch", { watchId }),

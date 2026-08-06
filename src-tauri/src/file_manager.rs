@@ -20,6 +20,7 @@ const MAX_RELATIVE_PATH_BYTES: usize = 8 * 1024;
 const MAX_TEXT_PREVIEW_BYTES: usize = 512 * 1024;
 const MAX_BINARY_PREVIEW_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_FONT_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_WATCHED_DIRECTORIES: usize = 128;
 const WORKSPACE_CHANGED_EVENT: &str = "vintage://workspace-changed";
 
 #[derive(Default)]
@@ -568,6 +569,7 @@ pub(crate) async fn workspace_watch(
     watcher_state: State<'_, WorkspaceWatcherRuntime>,
     workspace_id: String,
     watch_id: String,
+    paths: Vec<String>,
 ) -> Result<(), String> {
     let root = canonical_workspace_root(&workspace_root(&app, &workspace_id).await?)?;
     let event_root = root.clone();
@@ -589,8 +591,20 @@ pub(crate) async fn workspace_watch(
     })
     .map_err(|_| "Live workspace updates could not be started.".to_string())?;
     watcher
-        .watch(&root, RecursiveMode::Recursive)
+        .watch(&root, RecursiveMode::NonRecursive)
         .map_err(|_| "The workspace could not be watched for changes.".to_string())?;
+    let mut watched = std::collections::HashSet::new();
+    watched.insert(root.clone());
+    for path in paths.into_iter().take(MAX_WATCHED_DIRECTORIES) {
+        let Ok((directory, _)) = resolve_workspace_path(&root, &path) else {
+            continue;
+        };
+        if directory.is_dir() && watched.insert(directory.clone()) {
+            watcher
+                .watch(&directory, RecursiveMode::NonRecursive)
+                .map_err(|_| "The workspace could not be watched for changes.".to_string())?;
+        }
+    }
 
     watcher_state
         .watchers

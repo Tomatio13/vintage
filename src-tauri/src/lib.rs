@@ -376,6 +376,7 @@ async fn workspace_remove_root(
     app: AppHandle,
     state: State<'_, WorkspaceRuntime>,
     watcher_state: State<'_, WorkspaceWatcherRuntime>,
+    terminal_state: State<'_, TerminalRuntime>,
     workspace_id: String,
 ) -> Result<Vec<WorkspaceRootRecord>, HostError> {
     let _guard = state.lock.lock().await;
@@ -395,6 +396,7 @@ async fn workspace_remove_root(
     if let Ok(canonical) = PathBuf::from(&removed.path).canonicalize() {
         watcher_state.stop_for_root(&canonical);
     }
+    terminal_state.forget_workspace(&workspace_id);
     Ok(roots)
 }
 

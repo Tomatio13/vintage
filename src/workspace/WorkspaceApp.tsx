@@ -7,7 +7,15 @@
  * stops its PTY first, then removes the state.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { CSSProperties } from "react";
 import type { ResolvedAppearance } from "../appearance";
 import { host } from "../host/index.ts";
@@ -45,7 +53,6 @@ import {
 } from "./shortcuts.ts";
 import { SplitPaneView } from "./SplitPaneView.tsx";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
-import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel.tsx";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.tsx";
 import { WorkspaceTabs } from "./WorkspaceTabs.tsx";
 import type {
@@ -56,6 +63,11 @@ import type {
   WorkspaceState,
 } from "./types.ts";
 import "./workspace.css";
+
+const WorkspaceFilesPanel = lazy(async () => {
+  const panel = await import("./WorkspaceFilesPanel.tsx");
+  return { default: panel.WorkspaceFilesPanel };
+});
 
 /**
  * Quiet period after the last hook report before a pane decays from
@@ -84,6 +96,7 @@ export function WorkspaceApp({
   bindings,
   fontFamily,
   fontSize,
+  scrollback,
   preferredShellId,
   onOpenSettings,
 }: {
@@ -96,6 +109,8 @@ export function WorkspaceApp({
   fontFamily: string;
   /** Terminal font size in pixels. */
   fontSize: number;
+  /** Number of terminal lines kept in memory per live pane. */
+  scrollback: number;
   /** User-chosen default shell id, or null for the platform default. */
   preferredShellId: string | null;
   onOpenSettings: () => void;
@@ -630,6 +645,7 @@ export function WorkspaceApp({
           appearance={appearance}
           fontFamily={fontFamily}
           fontSize={fontSize}
+          scrollback={scrollback}
           onStart={handleStartPane}
           onClose={(id) => handleClosePane(workspace.id, tab.id, id)}
           onSplit={(id, direction) => {
@@ -803,21 +819,23 @@ export function WorkspaceApp({
       </div>
 
       {filesOpen && selectedWorkspace && (
-        <>
-          <PanelResizer
-            orientation="vertical"
-            value={filesWidth}
-            reverse
-            min={340}
-            max={760}
-            onChange={setFilesWidth}
-          />
-          <WorkspaceFilesPanel
-            workspace={selectedWorkspace}
-            active
-            onClose={() => setFilesOpen(false)}
-          />
-        </>
+        <Suspense fallback={null}>
+          <>
+            <PanelResizer
+              orientation="vertical"
+              value={filesWidth}
+              reverse
+              min={340}
+              max={760}
+              onChange={setFilesWidth}
+            />
+            <WorkspaceFilesPanel
+              workspace={selectedWorkspace}
+              active
+              onClose={() => setFilesOpen(false)}
+            />
+          </>
+        </Suspense>
       )}
     </div>
   );

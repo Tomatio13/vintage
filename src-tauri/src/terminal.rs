@@ -4,7 +4,8 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{mpsc, Arc, Mutex, MutexGuard},
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -16,6 +17,8 @@ use super::{
 const MIN_TERMINAL_DIMENSION: u16 = 2;
 const MAX_TERMINAL_DIMENSION: u16 = 500;
 const MAX_TERMINAL_WRITE_BYTES: usize = 64 * 1024;
+const TERMINAL_OUTPUT_BATCH_BYTES: usize = 32 * 1024;
+const TERMINAL_OUTPUT_BATCH_DELAY: Duration = Duration::from_millis(16);
 
 pub(crate) struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -37,12 +40,20 @@ impl Drop for TerminalSession {
 #[derive(Default)]
 pub(crate) struct TerminalRuntime {
     pub(crate) sessions: Mutex<HashMap<String, TerminalSession>>,
+    workspace_roots: Mutex<HashMap<String, PathBuf>>,
 }
 
 impl TerminalRuntime {
     pub(crate) fn shutdown(&self) {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.clear();
+        }
+    }
+
+    /// Removes a cached root when its registry entry is unregistered.
+    pub(crate) fn forget_workspace(&self, workspace_id: &str) {
+        if let Ok(mut roots) = self.workspace_roots.lock() {
+            roots.remove(workspace_id);
         }
     }
 }
@@ -143,7 +154,18 @@ fn terminal_size(cols: u16, rows: u16) -> Result<PtySize, String> {
 
 /// Resolves a workspace id to its registered root directory. The renderer
 /// passes only the id; the trusted path comes from the host registry.
-fn resolve_workspace_directory(app: &AppHandle, workspace_id: &str) -> Result<PathBuf, String> {
+fn resolve_workspace_directory(
+    app: &AppHandle,
+    runtime: &TerminalRuntime,
+    workspace_id: &str,
+) -> Result<PathBuf, String> {
+    if let Ok(roots) = runtime.workspace_roots.lock() {
+        if let Some(root) = roots.get(workspace_id) {
+            if root.is_dir() {
+                return Ok(root.clone());
+            }
+        }
+    }
     let registry_path = workspace_registry_host_path(app).map_err(|error| error.message)?;
     let load = workspaces::load_registry_blocking(&registry_path).map_err(|error| error.message)?;
     let record = load
@@ -156,6 +178,9 @@ fn resolve_workspace_directory(app: &AppHandle, workspace_id: &str) -> Result<Pa
         .map_err(|_| "The terminal working directory is unavailable.".to_string())?;
     if !canonical.is_dir() {
         return Err("The terminal working directory is not a folder.".to_string());
+    }
+    if let Ok(mut roots) = runtime.workspace_roots.lock() {
+        roots.insert(workspace_id.to_string(), canonical.clone());
     }
     Ok(canonical)
 }
@@ -213,6 +238,7 @@ pub(crate) fn agent_preset_info() -> Vec<AgentPresetInfo> {
 
 fn plan_launch(
     app: &AppHandle,
+    runtime: &TerminalRuntime,
     launch: &workspaces::PaneLaunchSpec,
     workspace_id: Option<String>,
 ) -> Result<(LaunchPlan, PathBuf), String> {
@@ -221,7 +247,7 @@ fn plan_launch(
             let workspace_id = workspace_id
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| "A workspace is required to start a terminal.".to_string())?;
-            let directory = resolve_workspace_directory(app, &workspace_id)?;
+            let directory = resolve_workspace_directory(app, runtime, &workspace_id)?;
             let detected = shells::detect_shells();
             let resolved = shells::resolve_shell(&detected, &shell_id)?;
             Ok((
@@ -243,7 +269,7 @@ fn plan_launch(
             let workspace_id = workspace_id
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| "A workspace is required to start an agent.".to_string())?;
-            let directory = resolve_workspace_directory(app, &workspace_id)?;
+            let directory = resolve_workspace_directory(app, runtime, &workspace_id)?;
             let detected = shells::detect_shells();
             let resolved = shells::resolve_shell(&detected, &shell_id)?;
             let preset_info = agent_preset_info()
@@ -284,7 +310,7 @@ fn plan_launch(
             let workspace_id = workspace_id
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| "A workspace is required to start a program.".to_string())?;
-            let directory = resolve_workspace_directory(app, &workspace_id)?;
+            let directory = resolve_workspace_directory(app, runtime, &workspace_id)?;
             let program_path = PathBuf::from(&program);
             if !program_path.is_absolute() {
                 return Err("A custom program must be an absolute path.".to_string());
@@ -339,7 +365,7 @@ pub(crate) fn terminal_start(
     validate_terminal_id(&terminal_id)?;
     validate_terminal_id(&pane_id)?;
     let size = terminal_size(cols, rows)?;
-    let (plan, working_directory) = plan_launch(&app, &launch, Some(workspace_id))?;
+    let (plan, working_directory) = plan_launch(&app, &state, &launch, Some(workspace_id))?;
 
     if lock_sessions(&state)?.contains_key(&terminal_id) {
         return Err("That terminal is already running.".to_string());
@@ -400,8 +426,7 @@ pub(crate) fn terminal_start(
     sessions.insert(terminal_id.clone(), session);
     drop(sessions);
 
-    let output_app = app.clone();
-    let output_terminal_id = terminal_id.clone();
+    let (output_sender, output_receiver) = mpsc::sync_channel::<Vec<u8>>(8);
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
         loop {
@@ -411,12 +436,30 @@ pub(crate) fn terminal_start(
             if read == 0 {
                 break;
             }
+            if output_sender.send(buffer[..read].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+
+    let output_app = app.clone();
+    let output_terminal_id = terminal_id.clone();
+    std::thread::spawn(move || {
+        while let Ok(first) = output_receiver.recv() {
+            let mut data = first;
+            while data.len() < TERMINAL_OUTPUT_BATCH_BYTES {
+                match output_receiver.recv_timeout(TERMINAL_OUTPUT_BATCH_DELAY) {
+                    Ok(next) => data.extend(next),
+                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
             let _ = output_app.emit(
                 "vintage://terminal-output",
                 TerminalOutputEvent {
                     terminal_id: output_terminal_id.clone(),
                     generation,
-                    data: buffer[..read].to_vec(),
+                    data,
                 },
             );
         }
@@ -547,7 +590,10 @@ pub(crate) fn agent_report_screen_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{terminal_size, validate_terminal_id, ActivitySource, MAX_TERMINAL_DIMENSION};
+    use super::{
+        terminal_size, validate_terminal_id, ActivitySource, MAX_TERMINAL_DIMENSION,
+        TERMINAL_OUTPUT_BATCH_BYTES, TERMINAL_OUTPUT_BATCH_DELAY,
+    };
 
     #[test]
     fn accepts_safe_terminal_identifiers() {
@@ -561,6 +607,15 @@ mod tests {
         assert!(terminal_size(80, 24).is_ok());
         assert!(terminal_size(1, 24).is_err());
         assert!(terminal_size(80, MAX_TERMINAL_DIMENSION + 1).is_err());
+    }
+
+    #[test]
+    fn terminal_output_batches_are_bounded_and_frame_sized() {
+        assert_eq!(TERMINAL_OUTPUT_BATCH_BYTES, 32 * 1024);
+        assert_eq!(
+            TERMINAL_OUTPUT_BATCH_DELAY,
+            std::time::Duration::from_millis(16)
+        );
     }
 
     #[test]
