@@ -8,7 +8,8 @@ mod workspaces;
 use chrono::Local;
 use file_manager::{
     workspace_inspect_attachment, workspace_list_directory, workspace_open_folder,
-    workspace_preview_file, workspace_unwatch, workspace_watch, WorkspaceWatcherRuntime,
+    workspace_preview_file, workspace_unwatch, workspace_watch, workspace_write_file,
+    WorkspaceWatcherRuntime,
 };
 use serde::Serialize;
 use std::{
@@ -539,6 +540,7 @@ pub fn run() {
             workspace_inspect_attachment,
             workspace_open_folder,
             workspace_preview_file,
+            workspace_write_file,
             workspace_watch,
             workspace_unwatch,
             workspace_list_roots,

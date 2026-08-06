@@ -290,8 +290,32 @@ function MarkdownCode({
   return <MarkdownHighlightedCode code={code} language={match[1]} />;
 }
 
+function htmlAttribute(attributes: string, name: string) {
+  const match = new RegExp(
+    `${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    "i",
+  ).exec(attributes);
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+}
+
+function normalizeMarkdownImages(markdown: string) {
+  return markdown
+    .replace(/<img\b([^>]*)>/gi, (_match, attributes: string) => {
+      const source = htmlAttribute(attributes, "src");
+      if (!source) return "";
+      const alt = htmlAttribute(attributes, "alt");
+      const title = htmlAttribute(attributes, "title");
+      return `![${alt}](${source}${title ? ` "${title}"` : ""})`;
+    })
+    .replace(/<\/?p\b[^>]*>/gi, "");
+}
+
 function resolveMarkdownAssetPath(markdownPath: string, source: string) {
-  if (!source || source.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(source))
+  if (
+    !source ||
+    source.startsWith("//") ||
+    /^[a-z][a-z\d+.-]*:/i.test(source)
+  )
     return null;
   let decodedSource: string;
   try {
@@ -299,7 +323,9 @@ function resolveMarkdownAssetPath(markdownPath: string, source: string) {
   } catch {
     return null;
   }
-  const segments = parentPath(markdownPath).split("/").filter(Boolean);
+  const segments = source.startsWith("/")
+    ? []
+    : parentPath(markdownPath).split("/").filter(Boolean);
   for (const segment of decodedSource.replace(/\\/g, "/").split("/")) {
     if (!segment || segment === ".") continue;
     if (segment === "..") {
@@ -336,6 +362,11 @@ function WorkspaceMarkdownImage({
       setUnavailable(false);
       return;
     }
+    if (/^https?:\/\//i.test(source)) {
+      setDataUrl(source);
+      setUnavailable(false);
+      return;
+    }
     const path = resolveMarkdownAssetPath(markdownPath, source);
     if (!path) {
       setDataUrl(null);
@@ -362,7 +393,18 @@ function WorkspaceMarkdownImage({
   }, [markdownPath, source, target]);
 
   if (dataUrl)
-    return <img alt={alt} src={dataUrl} title={title} loading="lazy" />;
+    return (
+      <img
+        alt={alt}
+        src={dataUrl}
+        title={title}
+        loading="lazy"
+        onError={() => {
+          setDataUrl(null);
+          setUnavailable(true);
+        }}
+      />
+    );
   return (
     <span className="file-preview-markdown-media" title={source}>
       {unavailable ? "Image unavailable" : "Loading image…"}
@@ -413,7 +455,7 @@ function WorkspaceMarkdown({
           ) : null,
       }}
     >
-      {children}
+      {normalizeMarkdownImages(children)}
     </ReactMarkdown>
   );
 }
@@ -464,21 +506,57 @@ export function FilePreviewPane({
   attachmentDisabled = false,
   attaching = false,
   onAttach,
+  onSave,
 }: {
   state: FilePreviewState | null;
   target: WorkspaceFileTarget;
   attachmentDisabled?: boolean;
   attaching?: boolean;
   onAttach?: (entry: WorkspaceFileEntry) => void;
+  onSave?: (entry: WorkspaceFileEntry, content: string) => Promise<void>;
 }) {
   const entry = state?.entry ?? null;
   const preview = state?.status === "ready" ? state.preview : null;
   const previewSize = preview?.size ?? entry?.size ?? null;
+  const [editorContent, setEditorContent] = useState("");
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [imageError, setImageError] = useState(false);
+  const [markdownMode, setMarkdownMode] = useState<"edit" | "preview">(
+    "preview",
+  );
+
+  useEffect(() => {
+    if (!entry || state?.status !== "ready" || preview?.kind !== "text") return;
+    if (!editorDirty) setEditorContent(preview.content ?? "");
+  }, [editorDirty, entry?.path, preview?.content, preview?.kind, state?.status]);
+
+  useEffect(() => {
+    setEditorDirty(false);
+    setSaveError(null);
+    setMarkdownMode("preview");
+    setImageError(false);
+  }, [entry?.path, preview?.dataUrl]);
+
+  async function saveEditor() {
+    if (!entry || !onSave || !editorDirty || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(entry, editorContent);
+      setEditorDirty(false);
+    } catch (error) {
+      setSaveError(String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <aside
       className="file-preview-pane"
-      aria-label={entry ? `Preview of ${entry.name}` : "File preview"}
+      aria-label={entry ? `Editor for ${entry.name}` : "File editor"}
     >
       <header className="file-preview-header">
         <span
@@ -491,9 +569,39 @@ export function FilePreviewPane({
           />
         </span>
         <div className="file-preview-heading" title={entry?.path}>
-          <span>PREVIEW</span>
+          <span>{preview?.kind === "text" ? "EDITOR" : "PREVIEW"}</span>
           <strong>{entry?.name ?? "Select a file"}</strong>
         </div>
+        {preview?.kind === "text" && onSave && (
+          <>
+            {isMarkdownFile(preview.name) && (
+              <div className="file-preview-mode-switch" role="group" aria-label="Markdown view">
+                <button
+                  type="button"
+                  aria-pressed={markdownMode === "edit"}
+                  onClick={() => setMarkdownMode("edit")}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={markdownMode === "preview"}
+                  onClick={() => setMarkdownMode("preview")}
+                >
+                  Preview
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              className="file-preview-save"
+              disabled={!editorDirty || saving}
+              onClick={() => void saveEditor()}
+            >
+              {saving ? "Saving…" : editorDirty ? "Save" : "Saved"}
+            </button>
+          </>
+        )}
         {entry?.kind === "file" && onAttach && (
           <button
             type="button"
@@ -546,9 +654,22 @@ export function FilePreviewPane({
             <p>{state.error}</p>
           </div>
         )}
-        {preview?.kind === "image" && preview.dataUrl && (
+        {preview?.kind === "image" && preview.dataUrl && !imageError && (
           <div className="file-preview-image-stage">
-            <img src={preview.dataUrl} alt={`Preview of ${preview.name}`} />
+            <img
+              src={preview.dataUrl}
+              alt={`Preview of ${preview.name}`}
+              onError={() => setImageError(true)}
+            />
+          </div>
+        )}
+        {preview?.kind === "image" && (imageError || !preview.dataUrl) && (
+          <div className="file-preview-message" role="alert">
+            <span>
+              <ExplorerIcon name="image" size={20} />
+            </span>
+            <strong>Image preview unavailable</strong>
+            <p>The image format could not be rendered in the app.</p>
           </div>
         )}
         {preview?.kind === "pdf" && preview.dataUrl && (
@@ -562,19 +683,33 @@ export function FilePreviewPane({
           <FontPreview dataUrl={preview.dataUrl} name={preview.name} />
         )}
         {preview?.kind === "text" &&
+        preview.content !== null &&
+        onSave &&
+        (!isMarkdownFile(preview.name) || markdownMode === "edit") ? (
+          <textarea
+            className="file-preview-editor"
+            value={editorContent}
+            spellCheck={false}
+            aria-label={`Edit ${preview.name}`}
+            onChange={(event) => {
+              setEditorContent(event.target.value);
+              setEditorDirty(true);
+              setSaveError(null);
+            }}
+          />
+        ) : preview?.kind === "text" &&
           preview.content !== null &&
-          isMarkdownFile(preview.name) && (
+          isMarkdownFile(preview.name) ? (
             <article className="file-preview-markdown">
               <WorkspaceMarkdown path={preview.path} target={target}>
                 {preview.content}
               </WorkspaceMarkdown>
             </article>
-          )}
-        {preview?.kind === "text" &&
+          ) : preview?.kind === "text" &&
           preview.content !== null &&
-          !isMarkdownFile(preview.name) && (
+          !isMarkdownFile(preview.name) ? (
             <SyntaxHighlightedCode code={preview.content} name={preview.name} />
-          )}
+          ) : null}
         {preview?.kind === "unsupported" && (
           <div className="file-preview-message" role="status">
             <span>
@@ -598,6 +733,8 @@ export function FilePreviewPane({
           {entry?.path ?? "Choose a file from the tree"}
         </span>
         <div>
+          {saveError && <em className="file-preview-save-error">{saveError}</em>}
+          {editorDirty && <em>Unsaved changes</em>}
           {preview?.truncated && preview.kind === "text" && (
             <em>First 512 KB</em>
           )}

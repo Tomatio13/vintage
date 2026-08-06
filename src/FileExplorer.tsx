@@ -345,6 +345,15 @@ export function FileExplorer({
     [target],
   );
 
+  const saveFile = useCallback(
+    async (entry: WorkspaceFileEntry, content: string) => {
+      if (!target) return;
+      await host.workspaceFiles.write(target, entry.path, content);
+      await previewFile(entry, true);
+    },
+    [previewFile, target],
+  );
+
   useEffect(() => {
     if (!active || !target) return;
 
@@ -814,7 +823,11 @@ export function FileExplorer({
           onPointerUp={finishSplitResize}
           onPointerCancel={finishSplitResize}
         />
-        <FilePreviewPane state={previewState} target={target} />
+        <FilePreviewPane
+          state={previewState}
+          target={target}
+          onSave={saveFile}
+        />
       </div>
       <div className="file-explorer-announcer" aria-live="polite">
         {notice}

@@ -499,6 +499,45 @@ body.is-resizing-file-preview * {
   transition: border-color 120ms ease, background 120ms ease, transform 80ms ease;
 }
 
+.file-preview-save {
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--tool-accent) 42%, var(--tool-border));
+  border-radius: 8px;
+  background: var(--tool-accent);
+  color: var(--tool-bg);
+  font: 650 calc((9px) * var(--app-font-scale)) var(--mono);
+}
+
+.file-preview-mode-switch {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--tool-border);
+  border-radius: 7px;
+  background: var(--tool-surface);
+}
+
+.file-preview-mode-switch button {
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tool-muted);
+  font: 600 calc((8px) * var(--app-font-scale)) var(--mono);
+}
+
+.file-preview-mode-switch button[aria-pressed="true"] {
+  background: var(--tool-accent-soft);
+  color: var(--tool-accent);
+}
+
+.file-preview-save:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
 .file-preview-attach:hover:not(:disabled) {
   border-color: var(--tool-accent);
   background: color-mix(in srgb, var(--tool-accent) 14%, transparent);
@@ -521,6 +560,27 @@ body.is-resizing-file-preview * {
   background:
     radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--tool-accent) 4%, transparent), transparent 42%),
     var(--tool-bg);
+}
+
+.file-preview-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 18px 20px 42px;
+  background: var(--tool-surface);
+  color: var(--tool-text-strong);
+  font: calc((12px) * var(--app-font-scale))/1.6 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-preview-editor:focus {
+  box-shadow: inset 0 0 0 1px var(--tool-accent);
 }
 
 .file-preview-image-stage {
@@ -989,6 +1049,14 @@ body.is-resizing-file-preview * {
 
 .file-preview-footer em {
   color: var(--tool-accent);
+}
+
+.file-preview-footer .file-preview-save-error {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--tool-danger, #d15d49);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @container file-explorer (max-width: 520px) {

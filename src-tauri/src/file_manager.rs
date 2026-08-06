@@ -18,6 +18,7 @@ use super::{inspect_attachment_paths, workspace_registry_host_path, workspaces, 
 const MAX_DIRECTORY_ENTRIES: usize = 5_000;
 const MAX_RELATIVE_PATH_BYTES: usize = 8 * 1024;
 const MAX_TEXT_PREVIEW_BYTES: usize = 512 * 1024;
+const MAX_TEXT_WRITE_BYTES: usize = 512 * 1024;
 const MAX_BINARY_PREVIEW_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_FONT_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_WATCHED_DIRECTORIES: usize = 128;
@@ -342,6 +343,26 @@ fn binary_preview_kind(mime_type: &str) -> Option<WorkspacePreviewKind> {
     }
 }
 
+fn detect_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.starts_with(b"BM") {
+        Some("image/bmp")
+    } else if bytes.starts_with(b"\x00\x00\x01\x00") {
+        Some("image/x-icon")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" && &bytes[8..12] == b"avif" {
+        Some("image/avif")
+    } else {
+        None
+    }
+}
+
 fn is_probably_text(bytes: &[u8]) -> bool {
     if bytes.contains(&0) {
         return false;
@@ -414,7 +435,15 @@ fn preview_workspace_file(
         .metadata()
         .map_err(|_| "The requested file could not be inspected.".to_string())?;
     let size = metadata.len();
-    let mime_type = mime_guess::from_path(&file).first_raw().map(str::to_string);
+    let mime_type = mime_guess::from_path(&file)
+        .first_raw()
+        .map(str::to_string)
+        .or_else(|| {
+            let mut header = [0_u8; 16];
+            let mut handle = fs::File::open(&file).ok()?;
+            let length = handle.read(&mut header).ok()?;
+            detect_image_mime(&header[..length]).map(str::to_string)
+        });
     let preview_path = portable_relative_path(&normalized_relative_path);
     let name = file
         .file_name()
@@ -503,6 +532,20 @@ fn preview_workspace_file(
     })
 }
 
+fn write_workspace_file(root: &Path, relative_path: &str, content: &str) -> Result<(), String> {
+    if content.len() > MAX_TEXT_WRITE_BYTES {
+        return Err("The file is too large to save in the editor.".to_string());
+    }
+    let (file, _) = resolve_workspace_path(root, relative_path)?;
+    if !file.is_file() {
+        return Err("The requested path is not a file.".to_string());
+    }
+    if !is_probably_text(content.as_bytes()) {
+        return Err("Only text files can be saved in the editor.".to_string());
+    }
+    fs::write(&file, content.as_bytes()).map_err(|_| "The file could not be saved.".to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn workspace_list_directory(
     app: AppHandle,
@@ -543,6 +586,19 @@ pub(crate) async fn workspace_preview_file(
     async_runtime::spawn_blocking(move || preview_workspace_file(&root, &path))
         .await
         .map_err(|_| "The requested file could not be previewed.".to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn workspace_write_file(
+    app: AppHandle,
+    workspace_id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let root = workspace_root(&app, &workspace_id).await?;
+    async_runtime::spawn_blocking(move || write_workspace_file(&root, &path, &content))
+        .await
+        .map_err(|_| "The file could not be saved.".to_string())?
 }
 
 #[tauri::command]
@@ -638,7 +694,8 @@ mod tests {
     use super::{
         list_workspace_directory, normalize_relative_path, preview_workspace_file,
         resolve_workspace_id_root, resolve_workspace_path, workspace_event_paths, workspaces,
-        WorkspaceFileKind, WorkspacePreviewKind, MAX_TEXT_PREVIEW_BYTES,
+        write_workspace_file, WorkspaceFileKind, WorkspacePreviewKind, MAX_TEXT_PREVIEW_BYTES,
+        MAX_TEXT_WRITE_BYTES,
     };
     use std::{fs, path::PathBuf};
 
@@ -702,6 +759,25 @@ mod tests {
         assert_eq!(listing.entries[1].path, "a-file.txt");
         assert_eq!(listing.entries[2].path, "B-file.txt");
         assert!(!listing.truncated);
+
+        fs::remove_dir_all(root).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn writes_text_files_and_rejects_binary_or_oversized_content() {
+        let root = temporary_directory("write-text");
+        fs::write(root.join("notes.txt"), b"before").expect("file should be created");
+
+        write_workspace_file(&root, "notes.txt", "after\n").expect("text should save");
+        assert_eq!(
+            fs::read_to_string(root.join("notes.txt")).unwrap(),
+            "after\n"
+        );
+        assert!(write_workspace_file(&root, "notes.txt", "a\0b").is_err());
+        assert!(
+            write_workspace_file(&root, "notes.txt", &"x".repeat(MAX_TEXT_WRITE_BYTES + 1))
+                .is_err()
+        );
 
         fs::remove_dir_all(root).expect("temporary directory should be removed");
     }
@@ -775,6 +851,27 @@ mod tests {
             .as_deref()
             .is_some_and(|url| url.starts_with("data:image/png;base64,")));
         assert!(preview.content.is_none());
+
+        fs::remove_dir_all(root).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn detects_extensionless_png_images_for_preview() {
+        let root = temporary_directory("extensionless-image-preview");
+        fs::write(
+            root.join("image-data"),
+            [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+        )
+        .expect("file should be created");
+
+        let preview = preview_workspace_file(&root, "image-data")
+            .expect("extensionless image should be previewed");
+
+        assert_eq!(preview.kind, WorkspacePreviewKind::Image);
+        assert!(preview
+            .data_url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("data:image/png;base64,")));
 
         fs::remove_dir_all(root).expect("temporary directory should be removed");
     }

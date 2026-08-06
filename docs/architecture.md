@@ -170,7 +170,7 @@ ______________________________________________________________________
 | 状態報告 | `agent_report_screen_state` |
 | Hook IPC | `hook_ipc_initialize` |
 | Integration | `integration_list`, `integration_install`, `integration_uninstall` |
-| ファイル | `workspace_list_directory`, `workspace_preview_file`, `workspace_watch`, `workspace_unwatch`, `workspace_open_folder`, `workspace_inspect_attachment` |
+| ファイル | `workspace_list_directory`, `workspace_preview_file`, `workspace_write_file`, `workspace_watch`, `workspace_unwatch`, `workspace_open_folder`, `workspace_inspect_attachment` |
 
 エラーは新規コマンドで `{ code, message }`（`invalid_request`／`not_found`／`conflict`／`unavailable`／`io_error`／`invalid_config`／`stale_generation`）。
 
