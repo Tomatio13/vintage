@@ -42,7 +42,7 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 - **Organizes parallel work.** Tabs and recursively split panes let several agents work inside the same registered project folder.
 - **Surfaces attention.** Agent activity rolls up from pane to tab to workspace as `blocked`, `working`, `done`, or `idle`. Screen-manifest detection works today, and Hook/Plugin reports (OpenCode plugin lifecycle, Codex/Claude session identity) take priority over screen detection once installed from Settings → Integrations.
 - **Session resume is under development.** The host-side resume commands and authenticated reporting pipeline exist, but native session resume is not yet a supported end-to-end feature.
-- **Keeps files close.** Browse a live workspace tree and preview text, source, images, PDF documents, and fonts without leaving the app.
+- **Keeps files close.** Browse a live workspace tree, edit and save text files, and preview images, PDF documents, and fonts without leaving the app.
 - **Restores placement, not processes.** Workspaces, tabs, splits, and pane definitions survive a restart; commands are never relaunched silently.
 - **Updates in place.** Signed update bundles are delivered through GitHub Releases and installed by the desktop app.
 
@@ -56,7 +56,7 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 | Agents | Grok, Codex, Claude Code, and OpenCode presets plus arbitrary custom programs; each runs inside a shell and returns to it when it exits |
 | Activity | Screen-manifest detection (Herdr-ported) rolls sidebar badges up to the workspace. Hook/Plugin reporting is installed from Settings → Integrations and takes priority over screen detection once reporting |
 | Restart | A stopped pane can restart into a fresh shell. Native session resume is under development |
-| Workspace files | Live file tree with hidden-file controls, system file-manager actions, and syntax-highlighted text, image, PDF, and font previews |
+| Workspace files | Live file tree with hidden-file controls, text editing and saving, system file-manager actions, and media previews |
 | Layout | Placement persists to `workspace-layouts.json`; damaged files stop autosave and offer a back-up-and-reset flow |
 | Updates | Signed in-app updates backed by GitHub Releases |
 
@@ -118,7 +118,7 @@ Start VINTAGE from your Applications folder, Start menu, or application launcher
 1. **Start a terminal** in a pane. A new tab starts with your default shell; each pane can be split horizontally or vertically.
 1. **Launch an agent** from a pane's controls, or just type its command into the shell directly (`codex`, `claude`, `opencode`, `grok`).
 1. **Watch the sidebar** — badges roll each pane up to its tab and workspace, so a blocked agent is visible from the tree.
-1. **Preview files** with the **Files** toggle on the right, and open folders in your system file manager.
+1. **Edit text files and preview files** with the **Files** toggle on the right, and open folders in your system file manager.
 
 Useful keyboard controls:
 
@@ -185,7 +185,7 @@ After installing, start a **new interactive session** of the agent inside a pane
 - VINTAGE does not read or store agent credentials or browser-auth tokens. Each agent CLI owns its own authentication.
 - VINTAGE stores registered workspace paths and placement in the operating system's application-data directory.
 - VINTAGE does not persist terminal output, prompts, or source-code contents, and it does not write prompts, responses, credentials, or raw process output to application logs.
-- Files opened in the right panel are read on demand for an in-memory preview. Text previews are capped at 512 KiB, font previews at 8 MiB, and supported image or PDF previews at 20 MiB.
+- Files opened in the right panel are read on demand. Text editing and saving is capped at 512 KiB; font previews at 8 MiB; supported image or PDF previews at 20 MiB.
 - Terminal panes run your local system shell with the workspace as their current directory. Commands entered there have the same local access as that shell.
 - The hook IPC token is generated in the renderer with Web Crypto, handed to the host once, injected only into PTY child environments, and never logged or persisted.
 - Local processes and filesystem access are initiated through the Tauri Rust host, not the renderer.

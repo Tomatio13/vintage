@@ -103,6 +103,12 @@ export const host = {
         ...workspaceFilePayload(target),
         path,
       }),
+    write: (target: WorkspaceFileTarget, path: string, content: string) =>
+      command<void>("workspace_write_file", {
+        ...workspaceFilePayload(target),
+        path,
+        content,
+      }),
     watch: (
       target: WorkspaceFileTarget,
       watchId: string,

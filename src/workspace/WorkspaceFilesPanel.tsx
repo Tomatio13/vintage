@@ -5,12 +5,9 @@
  * the "Files panel closed stops watching" lifecycle rule.
  */
 
-import { useState } from "react";
 import { FileExplorer } from "../FileExplorer.tsx";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import type { WorkspaceState } from "./types.ts";
-
-export type FilesPanelTab = "files" | "preview";
 
 export interface WorkspaceFilesPanelProps {
   workspace: WorkspaceState;
@@ -23,8 +20,6 @@ export function WorkspaceFilesPanel({
   active,
   onClose,
 }: WorkspaceFilesPanelProps) {
-  const [tab, setTab] = useState<FilesPanelTab>("files");
-
   return (
     <aside
       className="ws-files-panel"
@@ -33,29 +28,9 @@ export function WorkspaceFilesPanel({
     >
       <div
         className="ws-files-tabs"
-        role="tablist"
-        aria-label="Files panel views"
+        aria-label="Workspace files"
       >
-        <div className="ws-files-tab-rail">
-          <button
-            className="ws-files-tab"
-            type="button"
-            role="tab"
-            aria-selected={tab === "files"}
-            onClick={() => setTab("files")}
-          >
-            Files
-          </button>
-          <button
-            className="ws-files-tab"
-            type="button"
-            role="tab"
-            aria-selected={tab === "preview"}
-            onClick={() => setTab("preview")}
-          >
-            Preview
-          </button>
-        </div>
+        <span className="ws-files-tab-label">Files</span>
         <button
           className="ws-icon-button"
           type="button"
@@ -68,31 +43,23 @@ export function WorkspaceFilesPanel({
       </div>
 
       <div className="ws-files-content">
-        {tab === "files" && (
-          <ErrorBoundary
-            fallback={(error, onReset) => (
-              <div className="ws-files-error" role="alert">
-                <strong>Files could not be shown.</strong>
-                {error.message && <p>{error.message}</p>}
-                <button type="button" onClick={onReset}>
-                  Reload
-                </button>
-              </div>
-            )}
-          >
-            <FileExplorer
-              active={active}
-              workspaceId={workspace.id}
-              workspaceTitle={workspace.title}
-            />
-          </ErrorBoundary>
-        )}
-        {tab === "preview" && (
-          <div className="ws-files-preview-empty">
-            <strong>File preview</strong>
-            <p>Select a file in the Files tab to preview it here.</p>
-          </div>
-        )}
+        <ErrorBoundary
+          fallback={(error, onReset) => (
+            <div className="ws-files-error" role="alert">
+              <strong>Files could not be shown.</strong>
+              {error.message && <p>{error.message}</p>}
+              <button type="button" onClick={onReset}>
+                Reload
+              </button>
+            </div>
+          )}
+        >
+          <FileExplorer
+            active={active}
+            workspaceId={workspace.id}
+            workspaceTitle={workspace.title}
+          />
+        </ErrorBoundary>
       </div>
     </aside>
   );

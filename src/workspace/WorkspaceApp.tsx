@@ -826,7 +826,6 @@ export function WorkspaceApp({
               value={filesWidth}
               reverse
               min={340}
-              max={760}
               onChange={setFilesWidth}
             />
             <WorkspaceFilesPanel
@@ -852,14 +851,14 @@ function PanelResizer({
   orientation: "vertical" | "horizontal";
   value: number;
   min: number;
-  max: number;
+  max?: number;
   reverse?: boolean;
   onChange: (value: number) => void;
 }) {
   const dragging = useRef<{ pointer: number; base: number } | null>(null);
 
   function clamp(next: number) {
-    return Math.min(max, Math.max(min, next));
+    return Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min, next));
   }
 
   return (
@@ -868,7 +867,7 @@ function PanelResizer({
       role="separator"
       aria-orientation={orientation === "vertical" ? "vertical" : "horizontal"}
       aria-valuemin={min}
-      aria-valuemax={max}
+      {...(max === undefined ? {} : { "aria-valuemax": max })}
       aria-valuenow={Math.round(value)}
       tabIndex={0}
       onPointerDown={(event) => {
@@ -913,7 +912,7 @@ function PanelResizer({
           else if (event.key === "ArrowDown") next = value + step;
         }
         if (event.key === "Home") next = min;
-        else if (event.key === "End") next = max;
+        else if (event.key === "End" && max !== undefined) next = max;
         if (next === null) return;
         event.preventDefault();
         onChange(clamp(next));
