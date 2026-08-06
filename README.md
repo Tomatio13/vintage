@@ -38,7 +38,7 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 
 ## What VINTAGE does
 
-- **Runs real terminals.** Each pane owns an interactive shell process with scrollback, input, resize, restart, and explicit teardown.
+- **Runs real terminals.** Each pane owns an interactive shell process with configurable scrollback, input, resize, restart, and explicit teardown.
 - **Organizes parallel work.** Tabs and recursively split panes let several agents work inside the same registered project folder.
 - **Surfaces attention.** Agent activity rolls up from pane to tab to workspace as `blocked`, `working`, `done`, or `idle`. Screen-manifest detection works today, and Hook/Plugin reports (OpenCode plugin lifecycle, Codex/Claude session identity) take priority over screen detection once installed from Settings → Integrations.
 - **Session resume is under development.** The host-side resume commands and authenticated reporting pipeline exist, but native session resume is not yet a supported end-to-end feature.
@@ -51,8 +51,8 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 | Area | Current support |
 | --- | --- |
 | Workspaces | Registered project folders are the trust source for every terminal and file operation; unregistering stops processes and watchers but never deletes files |
-| Terminals | Interactive shell panes with tabs, recursive horizontal/vertical splits, divider resize, restart, and close |
-| Shells | PowerShell 5.1 / 7, Git Bash, Ubuntu default shell, Bash, Zsh, and validated custom executables |
+| Terminals | Interactive shell panes with configurable scrollback, tabs, recursive horizontal/vertical splits, divider resize, restart, and close |
+| Shells | PowerShell 5.1 / 7, Git Bash, Ubuntu default shell, Bash, Zsh, fast-startup variants for Git Bash/Bash/Zsh, and validated custom executables |
 | Agents | Grok, Codex, Claude Code, and OpenCode presets plus arbitrary custom programs; each runs inside a shell and returns to it when it exits |
 | Activity | Screen-manifest detection (Herdr-ported) rolls sidebar badges up to the workspace. Hook/Plugin reporting is installed from Settings → Integrations and takes priority over screen detection once reporting |
 | Restart | A stopped pane can restart into a fresh shell. Native session resume is under development |
@@ -60,7 +60,7 @@ VINTAGE gives every coding agent a real terminal pane and rolls its activity up 
 | Layout | Placement persists to `workspace-layouts.json`; damaged files stop autosave and offer a back-up-and-reset flow |
 | Updates | Signed in-app updates backed by GitHub Releases |
 
-VINTAGE currently ships for Windows x86-64 and Linux x86-64. Supported shells include PowerShell 5.1/7, Git Bash, Bash, Zsh, the Ubuntu default shell, and validated custom executables.
+VINTAGE currently ships for Windows x86-64 and Linux x86-64. Supported shells include PowerShell 5.1/7, Git Bash, Bash, Zsh, the Ubuntu default shell, fast-startup variants where available, and validated custom executables.
 
 ## Install VINTAGE
 
@@ -127,6 +127,15 @@ Useful keyboard controls:
 - Closing a pane, tab, or workspace stops its PTY first, then removes the placement.
 
 When you quit VINTAGE, every PTY, child process, file watcher, and hook IPC connection is stopped. Only the placement is saved; processes are never silently relaunched.
+
+### Speed up a slow shell prompt
+
+Choose **Settings → Application → Default shell**, then create a new terminal. When the corresponding shell is detected, VINTAGE provides these optional fast-startup choices:
+
+- **Git Bash (fast startup)** and **Bash (fast startup)** run with `--noprofile --norc` and skip shell profile and rc files.
+- **Zsh (fast startup)** runs with `zsh -f` and skips most zsh startup files.
+
+Fast startup is useful on lower-spec machines or profiles with many prompt plugins. It deliberately does not load aliases, themes, language-version managers, or other setup from those skipped files. Your existing shell configuration is never changed; select the normal shell again whenever that configuration is needed.
 
 ## How it works
 

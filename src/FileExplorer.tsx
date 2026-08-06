@@ -101,6 +101,7 @@ export function FileExplorer({
   const requestGeneration = useRef(0);
   const previewGeneration = useRef(0);
   const activeRef = useRef(active);
+  const watchIdRef = useRef<string | null>(null);
   const targetKeyRef = useRef<string | null>(null);
   const previewStateRef = useRef<FilePreviewState | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -353,6 +354,7 @@ export function FileExplorer({
     let refreshAll = false;
     const changedPaths = new Set<string>();
     const watchId = crypto.randomUUID();
+    watchIdRef.current = watchId;
 
     const refreshLoadedDirectories = (paths: string[]) => {
       const loadedDirectories = directoryRef.current;
@@ -409,23 +411,33 @@ export function FileExplorer({
         if (disposed) stopListening();
         else unlisten = stopListening;
       });
-    const watchStarted = host.workspaceFiles.watch(target, watchId);
-    void watchStarted.catch(() => undefined);
+    void host.workspaceFiles.watch(target, watchId, []);
 
-    const reconciliationTimer = window.setInterval(
-      () => scheduleRefresh([]),
-      15_000,
-    );
+    // Native watch events handle normal updates. Reconciliation protects
+    // against dropped OS events, but doing it too often is costly for large
+    // workspaces, so never run it while the app is backgrounded.
+    const reconciliationTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") scheduleRefresh([]);
+    }, 60_000);
     return () => {
       disposed = true;
       window.clearTimeout(refreshTimer);
       window.clearInterval(reconciliationTimer);
       unlisten?.();
-      void watchStarted
-        .then(() => host.workspaceFiles.unwatch(watchId))
-        .catch(() => undefined);
+      if (watchIdRef.current === watchId) watchIdRef.current = null;
+      void host.workspaceFiles.unwatch(watchId).catch(() => undefined);
     };
   }, [active, loadDirectory, previewFile, target]);
+
+  // Linux inotify allocates a watch per recursive directory. Reconfigure the
+  // host watch to cover only the root and directories the user has expanded.
+  // A bounded periodic reconciliation still recovers changes below collapsed
+  // branches without keeping watches alive for the entire repository.
+  useEffect(() => {
+    const watchId = watchIdRef.current;
+    if (!active || !target || !watchId) return;
+    void host.workspaceFiles.watch(target, watchId, Array.from(expanded));
+  }, [active, expanded, target]);
 
   function activateEntry(entry: WorkspaceFileEntry) {
     setSelectedPath(entry.path);

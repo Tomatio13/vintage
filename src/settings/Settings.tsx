@@ -22,6 +22,7 @@ import {
   TERMINAL_FONT_SIZE_STEP,
   type TerminalFontSettings,
 } from "../terminalFont.ts";
+import { TERMINAL_SCROLLBACK_OPTIONS } from "../terminalScrollback.ts";
 import type { AppUpdatePhase } from "../update/types";
 import { Icon } from "../ui/Icon";
 import { integrationAgentLabel } from "./integrations.ts";
@@ -151,6 +152,7 @@ export function SettingsScreen({
   fontScale,
   bindings,
   terminalFont,
+  terminalScrollback,
   preferredShellId,
   shells,
   appVersion,
@@ -164,6 +166,7 @@ export function SettingsScreen({
   onFontScaleChange,
   onTerminalFontSizeChange,
   onTerminalFontFamilyChange,
+  onTerminalScrollbackChange,
   onPreferredShellChange,
   onBindKey,
   onResetKeybindings,
@@ -179,6 +182,7 @@ export function SettingsScreen({
   fontScale: number;
   bindings: ShortcutBinding[];
   terminalFont: TerminalFontSettings;
+  terminalScrollback: number;
   preferredShellId: string | null;
   shells: ShellDescriptor[];
   appVersion: string | null;
@@ -192,6 +196,7 @@ export function SettingsScreen({
   onFontScaleChange: (scale: number) => void;
   onTerminalFontSizeChange: (size: number) => void;
   onTerminalFontFamilyChange: (preset: string, family?: string) => void;
+  onTerminalScrollbackChange: (scrollback: number) => void;
   onPreferredShellChange: (id: string) => void;
   onBindKey: (action: ShortcutAction, key: ShortcutKey) => boolean;
   onResetKeybindings: () => void;
@@ -511,6 +516,30 @@ export function SettingsScreen({
                       Reset
                     </button>
                   </div>
+                </div>
+
+                <div className="settings-row">
+                  <div>
+                    <strong>Terminal scrollback</strong>
+                    <small>
+                      Fewer retained lines reduce memory use for each live
+                      terminal.
+                    </small>
+                  </div>
+                  <select
+                    className="terminal-shell-select"
+                    value={terminalScrollback}
+                    aria-label="Terminal scrollback"
+                    onChange={(event) =>
+                      onTerminalScrollbackChange(Number(event.target.value))
+                    }
+                  >
+                    {TERMINAL_SCROLLBACK_OPTIONS.map((lines) => (
+                      <option key={lines} value={lines}>
+                        {lines.toLocaleString()} lines
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

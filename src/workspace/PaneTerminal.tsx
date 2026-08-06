@@ -29,6 +29,8 @@ export interface PaneTerminalProps {
   fontFamily: string;
   /** Terminal font size in pixels. */
   fontSize: number;
+  /** Number of terminal lines kept in memory per live pane. */
+  scrollback: number;
   onStart: (paneId: string) => void;
   onClose: (paneId: string) => void;
   onSplit: (paneId: string, direction: "horizontal" | "vertical") => void;
@@ -60,6 +62,7 @@ export function PaneTerminal({
   appearance,
   fontFamily,
   fontSize,
+  scrollback,
   onStart,
   onClose,
   onSplit,
@@ -133,6 +136,7 @@ export function PaneTerminal({
             focusRequest={focusRequest}
             fontFamily={fontFamily}
             fontSize={fontSize}
+            scrollback={scrollback}
             paneLaunch={{
               terminalId: runtime.terminalId,
               paneId: pane.id,

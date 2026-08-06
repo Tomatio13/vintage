@@ -178,6 +178,9 @@ body.is-resizing-file-preview * {
   outline: none;
   user-select: none;
   transition: background 90ms ease, color 90ms ease;
+  /* Skip paint and layout work for rows outside a large directory viewport. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
 }
 
 .file-tree-row[data-file-kind="folder"] {

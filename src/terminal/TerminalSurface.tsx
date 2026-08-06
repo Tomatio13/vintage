@@ -4,6 +4,7 @@ import type { ResolvedAppearance } from "../appearance";
 import { host } from "../host";
 import type { AgentActivity, TerminalInfo } from "../host/types";
 import { isDesktopHost } from "../shared/platform";
+import { initializeTerminalRuntime } from "./runtime.ts";
 import {
   buildLogicalLines,
   detectScreenActivity,
@@ -85,6 +86,7 @@ export function TerminalSurface({
   focusRequest,
   fontFamily,
   fontSize,
+  scrollback,
   onInfoChange,
   onStatusChange,
   onScreenState,
@@ -101,6 +103,8 @@ export function TerminalSurface({
   fontFamily: string;
   /** Terminal font size in pixels. */
   fontSize: number;
+  /** Number of terminal lines retained by xterm for this pane. */
+  scrollback: number;
   onInfoChange: (info: TerminalInfo | null) => void;
   onStatusChange: (status: TerminalStatus, message?: string) => void;
   /** Live bottom-buffer screen state, debounced ~120ms after output. */
@@ -108,13 +112,37 @@ export function TerminalSurface({
 }) {
   const container = useRef<HTMLDivElement | null>(null);
   const terminalInstance = useRef<Terminal | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const panelOpenRef = useRef(panelOpen);
   const paneLaunchRef = useRef<PaneLaunchRequest | null>(paneLaunch ?? null);
   paneLaunchRef.current = paneLaunch ?? null;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
   const onScreenStateRef = useRef(onScreenState);
   onScreenStateRef.current = onScreenState;
   const requestFit = useRef<(() => void) | null>(null);
+  const requestScreenReport = useRef<(() => void) | null>(null);
   const [renderReady, setRenderReady] = useState(false);
+  const [terminalRuntimeReady, setTerminalRuntimeReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void initializeTerminalRuntime()
+      .then(() => {
+        if (!cancelled) setTerminalRuntimeReady(true);
+      })
+      .catch(() => {
+        if (!cancelled)
+          onStatusChangeRef.current(
+            "error",
+            "The terminal runtime could not start.",
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     panelOpenRef.current = panelOpen;
@@ -164,6 +192,17 @@ export function TerminalSurface({
       terminalInstance.current.options.theme = terminalTheme(appearance);
   }, [appearance]);
 
+  useEffect(() => {
+    if (terminalInstance.current)
+      terminalInstance.current.options.scrollback = scrollback;
+  }, [scrollback]);
+
+  useEffect(() => {
+    const terminal = terminalInstance.current;
+    if (terminal) terminal.options.cursorBlink = active && panelOpen;
+    if (active && panelOpen) requestScreenReport.current?.();
+  }, [active, panelOpen]);
+
   // Apply font family/size changes to a live terminal. Changing the family
   // alters glyph widths, so the character grid must be re-measured: re-run fit
   // after the option takes effect, otherwise xterm keeps the old cell size and
@@ -184,6 +223,7 @@ export function TerminalSurface({
   }, [fontFamily, fontSize]);
 
   useEffect(() => {
+    if (!terminalRuntimeReady) return;
     const target = container.current;
     if (!target) return;
 
@@ -202,8 +242,10 @@ export function TerminalSurface({
     const unlisteners: Array<() => void> = [];
     const encoder = new TextEncoder();
     let writeQueue = Promise.resolve();
+    let outputFrame = 0;
+    let pendingOutput: number[] = [];
     const terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: activeRef.current && panelOpenRef.current,
       cursorStyle: "bar",
       fontFamily,
       fontSize,
@@ -211,7 +253,7 @@ export function TerminalSurface({
       // CJK glyphs and prompt symbols (❯, #, $) are never clipped at the top
       // or bottom of a row. ghostty-web defaults to 1 (font height + 2px).
       lineHeight: 1.1,
-      scrollback: 5000,
+      scrollback,
       theme: terminalTheme(appearance),
     });
     const fitAddon = new FitAddon();
@@ -280,6 +322,7 @@ export function TerminalSurface({
       }
 
       const reportScreen = () => {
+        if (!activeRef.current) return;
         const launch = paneLaunchRef.current;
         if (!launch || launch.launch.type !== "agent") return;
         const agent = launch.launch.preset;
@@ -310,15 +353,33 @@ export function TerminalSurface({
         }
       };
       const scheduleScreenReport = () => {
+        if (!activeRef.current) {
+          window.clearTimeout(screenTimer);
+          return;
+        }
         window.clearTimeout(screenTimer);
         screenTimer = window.setTimeout(reportScreen, 120);
       };
+      requestScreenReport.current = scheduleScreenReport;
 
       try {
+        const flushOutput = () => {
+          outputFrame = 0;
+          if (pendingOutput.length === 0) return;
+          const output = pendingOutput;
+          pendingOutput = [];
+          terminal.write(Uint8Array.from(output));
+        };
+        const enqueueOutput = (data: number[]) => {
+          pendingOutput.push(...data);
+          if (outputFrame === 0) {
+            outputFrame = window.requestAnimationFrame(flushOutput);
+          }
+        };
         const listeners = await Promise.all([
           host.terminal.onOutput((payload) => {
             if (payload.terminalId === terminalId) {
-              terminal.write(Uint8Array.from(payload.data));
+              enqueueOutput(payload.data);
               scheduleScreenReport();
             }
           }),
@@ -398,9 +459,12 @@ export function TerminalSurface({
       active = false;
       running.current = false;
       requestFit.current = null;
+      requestScreenReport.current = null;
       window.clearTimeout(resizeTimer);
       window.clearTimeout(screenTimer);
       window.cancelAnimationFrame(resizeFrame);
+      window.cancelAnimationFrame(outputFrame);
+      pendingOutput = [];
       resizeObserver.disconnect();
       dataSubscription.dispose();
       resizeSubscription.dispose();
@@ -413,7 +477,7 @@ export function TerminalSurface({
         terminalInstance.current = null;
       terminal.dispose();
     };
-  }, [restartToken]);
+  }, [restartToken, terminalRuntimeReady]);
 
   return (
     <div
