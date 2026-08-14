@@ -630,6 +630,12 @@ body.is-resizing-ws-divider .ws-divider::after {
   overflow: hidden;
 }
 
+/* Keep the xterm default grid out of view until the first PTY output has been
+   fully parsed and rendered. This avoids a one-frame flash during shell boot. */
+.ws-pane-terminal .terminal-surface[data-render-ready="false"] > * {
+  visibility: hidden;
+}
+
 /* xterm.js and ghostty-web both place a child element that must fill the
    surface. Target the direct children generically so either renderer works. */
 .ws-pane-terminal .terminal-surface > .xterm,

@@ -258,6 +258,11 @@ export function TerminalSurface({
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    // Do not expose xterm's default grid while its first output is still being
+    // parsed. Zsh enables terminal modes immediately before its first prompt;
+    // showing that intermediate frame looks like a brief garble on new panes.
+    target.dataset.renderReady = "false";
+    setRenderReady(false);
     terminal.open(target);
     terminalInstance.current = terminal;
 
@@ -276,10 +281,7 @@ export function TerminalSurface({
           ) {
             terminal.resize(dimensions.cols, dimensions.rows);
           }
-          if (panelOpenRef.current) {
-            setRenderReady(true);
-            if (!startRequested) void start();
-          }
+          if (panelOpenRef.current && !startRequested) void start();
         } catch {
           // xterm can be between layout and disposal while the pane is closing.
         }
@@ -368,7 +370,15 @@ export function TerminalSurface({
           if (pendingOutput.length === 0) return;
           const output = pendingOutput;
           pendingOutput = [];
-          terminal.write(Uint8Array.from(output));
+          terminal.write(Uint8Array.from(output), () => {
+            if (!active || !panelOpenRef.current) return;
+            // `write` is asynchronous. Wait for its parser and renderer, then
+            // reveal the completed first frame instead of its control-sequence
+            // and glyph-layout intermediates.
+            window.requestAnimationFrame(() => {
+              if (active && panelOpenRef.current) setRenderReady(true);
+            });
+          });
         };
         const enqueueOutput = (data: number[]) => {
           pendingOutput.push(...data);
