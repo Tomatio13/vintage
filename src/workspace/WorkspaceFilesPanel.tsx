@@ -5,18 +5,21 @@
  * the "Files panel closed stops watching" lifecycle rule.
  */
 
+import { memo } from "react";
 import { FileExplorer } from "../FileExplorer.tsx";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import type { WorkspaceState } from "./types.ts";
 
 export interface WorkspaceFilesPanelProps {
-  workspace: WorkspaceState;
+  workspaceId: WorkspaceState["id"];
+  workspaceTitle: WorkspaceState["title"];
   active: boolean;
   onClose: () => void;
 }
 
-export function WorkspaceFilesPanel({
-  workspace,
+export const WorkspaceFilesPanel = memo(function WorkspaceFilesPanel({
+  workspaceId,
+  workspaceTitle,
   active,
   onClose,
 }: WorkspaceFilesPanelProps) {
@@ -56,11 +59,11 @@ export function WorkspaceFilesPanel({
         >
           <FileExplorer
             active={active}
-            workspaceId={workspace.id}
-            workspaceTitle={workspace.title}
+            workspaceId={workspaceId}
+            workspaceTitle={workspaceTitle}
           />
         </ErrorBoundary>
       </div>
     </aside>
   );
-}
+});
