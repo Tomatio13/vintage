@@ -171,6 +171,7 @@ export function WorkspaceApp({
   >(null);
   const [sidebarWidth, setSidebarWidth] = useState(258);
   const [filesWidth, setFilesWidth] = useState(340);
+  const handleCloseFilesPanel = useCallback(() => setFilesOpen(false), []);
 
   // Keep panel widths within the viewport as the window resizes. The sidebar
   // and files panel are grid columns, so a stale width makes the center pane
@@ -829,9 +830,10 @@ export function WorkspaceApp({
               onChange={setFilesWidth}
             />
             <WorkspaceFilesPanel
-              workspace={selectedWorkspace}
+              workspaceId={selectedWorkspace.id}
+              workspaceTitle={selectedWorkspace.title}
               active
-              onClose={() => setFilesOpen(false)}
+              onClose={handleCloseFilesPanel}
             />
           </>
         </Suspense>

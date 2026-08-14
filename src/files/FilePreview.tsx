@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentProps } from "react";
+import { memo, useEffect, useState, type ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { host } from "../host";
@@ -500,7 +500,7 @@ function FontPreview({ dataUrl, name }: { dataUrl: string; name: string }) {
   );
 }
 
-export function FilePreviewPane({
+export const FilePreviewPane = memo(function FilePreviewPane({
   state,
   target,
   attachmentDisabled = false,
@@ -746,4 +746,4 @@ export function FilePreviewPane({
       </footer>
     </aside>
   );
-}
+});
