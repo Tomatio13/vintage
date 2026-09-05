@@ -3,6 +3,7 @@
  * tab stops its panes first (handled by the parent) before removal.
  */
 
+import { Icon } from "../ui/Icon";
 import { useRef, useState } from "react";
 import {
   LAYOUT_LIMITS,
@@ -126,7 +127,7 @@ export function WorkspaceTabs({
               aria-label={`Close tab ${tab.title}`}
               onClick={() => onCloseTab(tab.id)}
             >
-              ✕
+              <Icon name="x" />
             </button>
           </div>
         );
@@ -138,7 +139,7 @@ export function WorkspaceTabs({
         aria-label="New tab"
         onClick={onAddTab}
       >
-        +
+        <Icon name="plus" />
       </button>
     </div>
   );

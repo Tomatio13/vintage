@@ -5,16 +5,11 @@
  */
 
 import { useRef, useState } from "react";
+import { Icon } from "../ui/Icon";
 import { activityLabel } from "./agentState.ts";
 import { LAYOUT_LIMITS } from "./types.ts";
 import { listPaneIds } from "./paneLayout.ts";
 import type { AgentActivity, WorkspaceState } from "./types.ts";
-
-/** Truncates a long native session id for the sidebar badge area. */
-function shortenSessionId(id: string): string {
-  if (id.length <= 10) return id;
-  return `${id.slice(0, 7)}…`;
-}
 
 export interface WorkspaceSidebarProps {
   workspaces: WorkspaceState[];
@@ -22,7 +17,7 @@ export interface WorkspaceSidebarProps {
   paneBadges: Record<string, AgentActivity>;
   tabBadges: Record<string, AgentActivity>;
   errorTabs: ReadonlySet<string>;
-  /** Native session ids reported by hooks, shown next to the pane badge. */
+  /** Native session ids reported by hooks, available in pane tooltips. */
   paneSessionIds: Record<string, string>;
   /** Agent CLI name (codex/claude/opencode) reported by a hook for a pane. */
   paneAgentNames: Record<string, string>;
@@ -110,7 +105,7 @@ export function WorkspaceSidebar({
             aria-label="Open a workspace folder"
             onClick={onAddWorkspace}
           >
-            +
+            <Icon name="plus" />
           </button>
         </div>
       </div>
@@ -134,21 +129,26 @@ export function WorkspaceSidebar({
             <div className="ws-workspace" key={workspace.id}>
               <div
                 className="ws-workspace-row"
-                role="button"
-                tabIndex={0}
                 data-selected={selected}
-                title={workspace.path}
-                onClick={() => onSelectWorkspace(workspace.id)}
-                onDoubleClick={() => toggleCollapsed(workspace.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSelectWorkspace(workspace.id);
-                  }
-                }}
               >
-                <span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
-                <span className="ws-row-label">{workspace.title}</span>
+                <button
+                  className="ws-icon-button ws-disclosure"
+                  type="button"
+                  aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${workspace.title}`}
+                  aria-expanded={!isCollapsed}
+                  onClick={() => toggleCollapsed(workspace.id)}
+                >
+                  <Icon name="chevron-down" />
+                </button>
+                <button
+                  className="ws-workspace-select ws-row-label"
+                  type="button"
+                  title={workspace.path}
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => onSelectWorkspace(workspace.id)}
+                >
+                  {workspace.title}
+                </button>
                 <button
                   className="ws-row-close"
                   type="button"
@@ -159,7 +159,7 @@ export function WorkspaceSidebar({
                     onRemoveWorkspace(workspace.id);
                   }}
                 >
-                  ✕
+                  <Icon name="x" />
                 </button>
               </div>
 
@@ -196,6 +196,11 @@ export function WorkspaceSidebar({
                               role="button"
                               tabIndex={0}
                               data-selected={tab.selectedPaneId === paneId}
+                              title={
+                                paneSessionIds[paneId]
+                                  ? `Session ${paneSessionIds[paneId]}`
+                                  : undefined
+                              }
                               onClick={() =>
                                 onSelectPane(workspace.id, tab.id, paneId)
                               }
@@ -208,6 +213,7 @@ export function WorkspaceSidebar({
                                 )
                               }
                               onKeyDown={(event) => {
+                                if (event.target !== event.currentTarget) return;
                                 if (
                                   event.key === "Enter" ||
                                   event.key === " "
@@ -245,15 +251,6 @@ export function WorkspaceSidebar({
                                   )}
                                 </span>
                               )}
-                              {!paneAgentNames[paneId] &&
-                                paneSessionIds[paneId] && (
-                                  <span
-                                    className="ws-pane-session"
-                                    title={`Session ${paneSessionIds[paneId]}`}
-                                  >
-                                    {shortenSessionId(paneSessionIds[paneId])}
-                                  </span>
-                                )}
                               {editingPaneId === paneId ? (
                                 <input
                                   className="ws-pane-title-input"
@@ -307,7 +304,7 @@ export function WorkspaceSidebar({
                                   onClosePane(workspace.id, tab.id, paneId);
                                 }}
                               >
-                                ✕
+                                <Icon name="x" />
                               </button>
                             </div>
                           );
@@ -322,6 +319,7 @@ export function WorkspaceSidebar({
 
       <div className="ws-sidebar-footer">
         <button type="button" onClick={onOpenSettings}>
+          <Icon name="sliders" />
           Settings
         </button>
       </div>

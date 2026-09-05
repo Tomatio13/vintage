@@ -7,6 +7,7 @@
  * restart menu in Phase 6, when agent launch definitions land.
  */
 
+import { Icon } from "../ui/Icon";
 import { useEffect, useRef, useState } from "react";
 import type { ResolvedAppearance } from "../appearance";
 import {
@@ -101,7 +102,7 @@ export function PaneTerminal({
             aria-label={`Split ${pane.title} to the right`}
             onClick={() => onSplit(pane.id, "horizontal")}
           >
-            ◫
+            <Icon name="panel" />
           </button>
           <button
             className="ws-mini-button"
@@ -110,7 +111,9 @@ export function PaneTerminal({
             aria-label={`Split ${pane.title} below`}
             onClick={() => onSplit(pane.id, "vertical")}
           >
-            ⬒
+            <span className="ws-split-below-icon">
+              <Icon name="panel" />
+            </span>
           </button>
           <button
             className="ws-mini-button"
@@ -119,7 +122,7 @@ export function PaneTerminal({
             aria-label={`Close ${pane.title}`}
             onClick={() => onClose(pane.id)}
           >
-            ✕
+            <Icon name="x" />
           </button>
         </div>
       </div>
