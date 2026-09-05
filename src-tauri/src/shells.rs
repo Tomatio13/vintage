@@ -486,7 +486,7 @@ fn current_platform() -> ShellPlatform {
 }
 
 fn resolved_from_descriptor(descriptor: ShellDescriptor) -> ResolvedShell {
-    let mut env = BTreeMap::new();
+    let mut env = shell_prompt_environment(&descriptor);
     let args: Vec<String> = match descriptor.kind {
         ShellKind::Powershell | ShellKind::Pwsh => {
             vec!["-NoLogo".to_string(), "-NoExit".to_string()]
@@ -542,7 +542,7 @@ pub(crate) fn agent_wrapper_command(
     descriptor: ShellDescriptor,
     agent_argv: &[String],
 ) -> AgentWrapperCommand {
-    let mut env = BTreeMap::new();
+    let mut env = shell_prompt_environment(&descriptor);
     let args = match descriptor.kind {
         ShellKind::Powershell | ShellKind::Pwsh => {
             let script = powershell_agent_script(agent_argv);
@@ -583,6 +583,28 @@ pub(crate) fn agent_wrapper_command(
         args,
         env,
     }
+}
+
+/// Fast Zsh skips theme initialization, so inherited prompt expressions may
+/// refer to missing functions and color arrays. Set both names of each Zsh
+/// prompt alias so environment import order cannot revive a parent's theme.
+fn shell_prompt_environment(descriptor: &ShellDescriptor) -> BTreeMap<String, String> {
+    if !uses_fast_zsh_startup(descriptor) {
+        return BTreeMap::new();
+    }
+    [
+        ("PS1", "%n@%m %1~ %# "),
+        ("PROMPT", "%n@%m %1~ %# "),
+        ("PS2", "%_> "),
+        ("PROMPT2", "%_> "),
+        ("RPS1", ""),
+        ("RPROMPT", ""),
+        ("RPS2", ""),
+        ("RPROMPT2", ""),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value.to_string()))
+    .collect()
 }
 
 fn uses_fast_bash_startup(descriptor: &ShellDescriptor) -> bool {
@@ -966,6 +988,49 @@ mod tests {
             zsh_agent_arguments(&["codex".to_string()], false)[3],
             "'codex'; exec zsh -l -i"
         );
+    }
+
+    #[test]
+    fn fast_zsh_replaces_all_inherited_prompt_aliases_for_shells_and_agents() {
+        let host = FakeHost::new().bin("zsh", "/usr/bin/zsh");
+        let shells = host.with_input(detect_unix_shells);
+        let resolved = resolve_shell(&shells, SHELL_ID_UNIX_ZSH_FAST).unwrap();
+        let wrapper = agent_wrapper_command(resolved.descriptor.clone(), &["false".to_string()]);
+        for (name, expected) in [
+            ("PS1", "%n@%m %1~ %# "),
+            ("PROMPT", "%n@%m %1~ %# "),
+            ("PS2", "%_> "),
+            ("PROMPT2", "%_> "),
+            ("RPS1", ""),
+            ("RPROMPT", ""),
+            ("RPS2", ""),
+            ("RPROMPT2", ""),
+        ] {
+            assert_eq!(resolved.env.get(name).map(String::as_str), Some(expected));
+            assert_eq!(wrapper.env.get(name).map(String::as_str), Some(expected));
+        }
+    }
+
+    #[test]
+    fn other_shells_preserve_their_prompt_environment() {
+        let host = FakeHost::new()
+            .bin("zsh", "/usr/bin/zsh")
+            .bin("bash", "/bin/bash");
+        let mut shells = host.with_input(detect_unix_shells);
+        shells.extend(host.with_input(detect_windows_shells));
+        for descriptor in shells {
+            if descriptor.id == SHELL_ID_UNIX_ZSH_FAST {
+                continue;
+            }
+            let resolved = super::resolved_from_descriptor(descriptor.clone());
+            let wrapper = agent_wrapper_command(descriptor, &["codex".to_string()]);
+            for name in [
+                "PS1", "PROMPT", "PS2", "PROMPT2", "RPS1", "RPROMPT", "RPS2", "RPROMPT2",
+            ] {
+                assert!(!resolved.env.contains_key(name));
+                assert!(!wrapper.env.contains_key(name));
+            }
+        }
     }
 
     #[test]

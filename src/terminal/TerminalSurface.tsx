@@ -25,11 +25,11 @@ export interface PaneLaunchRequest {
 }
 
 const LIGHT_TERMINAL_THEME = {
-  background: "#f4f8ff",
-  foreground: "#1d2b42",
-  cursor: "#006edc",
-  cursorAccent: "#f4f8ff",
-  selectionBackground: "#75b9ff66",
+  background: "#f7f4ee",
+  foreground: "#302b24",
+  cursor: "#856329",
+  cursorAccent: "#f7f4ee",
+  selectionBackground: "#85632933",
   black: "#142033",
   red: "#b94736",
   green: "#0b8f66",
@@ -49,27 +49,27 @@ const LIGHT_TERMINAL_THEME = {
 };
 
 const DARK_TERMINAL_THEME = {
-  background: "#050914",
-  foreground: "#d9e8ff",
-  cursor: "#42c8ff",
-  cursorAccent: "#050914",
-  selectionBackground: "#165b8f99",
-  black: "#08101d",
+  background: "#191816",
+  foreground: "#e6e1d8",
+  cursor: "#c6a66b",
+  cursorAccent: "#191816",
+  selectionBackground: "#c6a66b40",
+  black: "#24211d",
   red: "#ff7e68",
   green: "#5ee6a8",
   yellow: "#e6c56f",
   blue: "#56a8ff",
   magenta: "#f778ff",
   cyan: "#42d9ff",
-  white: "#d9e8ff",
-  brightBlack: "#60789a",
+  white: "#e6e1d8",
+  brightBlack: "#928879",
   brightRed: "#ff9b89",
   brightGreen: "#8ff0c4",
   brightYellow: "#f2d98f",
   brightBlue: "#8fc7ff",
   brightMagenta: "#ffadff",
   brightCyan: "#8be9ff",
-  brightWhite: "#f4f8ff",
+  brightWhite: "#fffaf0",
 };
 
 function terminalTheme(appearance: ResolvedAppearance) {

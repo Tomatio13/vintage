@@ -133,7 +133,7 @@ When you quit VINTAGE, every PTY, child process, file watcher, and hook IPC conn
 Choose **Settings → Application → Default shell**, then create a new terminal. When the corresponding shell is detected, VINTAGE provides these optional fast-startup choices:
 
 - **Git Bash (fast startup)** and **Bash (fast startup)** run with `--noprofile --norc` and skip shell profile and rc files.
-- **Zsh (fast startup)** runs with `zsh -f` and skips most zsh startup files.
+- **Zsh (fast startup)** runs with `zsh -f` and skips most zsh startup files. It uses a built-in user/host/directory prompt instead of inheriting a theme-dependent prompt, including after an agent exits.
 
 Fast startup is useful on lower-spec machines or profiles with many prompt plugins. It deliberately does not load aliases, themes, language-version managers, or other setup from those skipped files. Your existing shell configuration is never changed; select the normal shell again whenever that configuration is needed.
 
