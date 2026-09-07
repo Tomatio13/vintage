@@ -1,6 +1,6 @@
 [package]
 name = "vintage"
-version = "0.4.1"
+version = "0.4.2"
 description = "Visual Interface for Terminal Agents"
 authors = ["Taiga Ebihara"]
 edition = "2021"

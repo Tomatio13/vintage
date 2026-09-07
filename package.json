@@ -1,7 +1,7 @@
 {
   "name": "vintage",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Visual Interface for Terminal Agents.",
   "type": "module",
   "packageManager": "pnpm@11.18.0",
