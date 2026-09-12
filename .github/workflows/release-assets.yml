@@ -1,0 +1,16 @@
+name: Publish release assets
+on: { workflow_dispatch: { inputs: { tag: { required: true, default: v0.5.1 } } } }
+permissions: { contents: write }
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: 1.95.0 }
+      - run: cargo +1.95.0 build -p vintage-gpui --release --locked
+      - run: choco install innosetup -y
+      - shell: pwsh
+        run: $env:VINTAGE_VERSION='0.5.1'; iscc packaging/windows/vintage.iss
+      - uses: softprops/action-gh-release@v2
+        with: { tag_name: '${{ inputs.tag }}', files: VINTAGE_0.5.1_x64-setup.exe }
