@@ -837,7 +837,7 @@ mod tests {
 
         let legacy = find(&shells, SHELL_ID_WINDOWS_POWERSHELL);
         assert_eq!(
-            legacy.executable,
+            legacy.executable.replace('\\', "/"),
             "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
         );
         assert!(legacy.available);
@@ -861,7 +861,10 @@ mod tests {
         let shells = host.with_input(detect_windows_shells);
         let default = find(&shells, SHELL_ID_WINDOWS_DEFAULT);
         assert_eq!(default.kind, ShellKind::Pwsh);
-        assert_eq!(default.executable, "C:/Program Files/PowerShell/7/pwsh.exe");
+        assert_eq!(
+            default.executable.replace('\\', "/"),
+            "C:/Program Files/PowerShell/7/pwsh.exe"
+        );
     }
 
     #[test]
@@ -873,7 +876,10 @@ mod tests {
         let shells = host.with_input(detect_windows_shells);
         let git_bash = find(&shells, SHELL_ID_WINDOWS_GIT_BASH);
         assert!(git_bash.available);
-        assert_eq!(git_bash.executable, "C:/Program Files/Git/bin/bash.exe");
+        assert_eq!(
+            git_bash.executable.replace('\\', "/"),
+            "C:/Program Files/Git/bin/bash.exe"
+        );
 
         // WSL launcher: System32\bash.exe with no Git root -> rejected from
         // PATH, then found at a real Git install location instead.
@@ -883,7 +889,10 @@ mod tests {
             .file("C:/Program Files/Git/bin/bash.exe");
         let shells = host.with_input(detect_windows_shells);
         let git_bash = find(&shells, SHELL_ID_WINDOWS_GIT_BASH);
-        assert_eq!(git_bash.executable, "C:/Program Files/Git/bin/bash.exe");
+        assert_eq!(
+            git_bash.executable.replace('\\', "/"),
+            "C:/Program Files/Git/bin/bash.exe"
+        );
 
         // No Git anywhere -> unavailable.
         let host = FakeHost::new().bin("bash.exe", "C:/Windows/System32/bash.exe");
@@ -912,7 +921,9 @@ mod tests {
             .file("C:/Users/me/AppData/Local/Programs/Git/bin/bash.exe");
         let shells = host.with_input(detect_windows_shells);
         assert_eq!(
-            find(&shells, SHELL_ID_WINDOWS_GIT_BASH).executable,
+            find(&shells, SHELL_ID_WINDOWS_GIT_BASH)
+                .executable
+                .replace('\\', "/"),
             "C:/Users/me/AppData/Local/Programs/Git/bin/bash.exe"
         );
     }

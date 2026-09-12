@@ -849,8 +849,10 @@ mod tests {
                     command_contains_marker(command, &marker),
                     "{event} command should carry its marker: {command}"
                 );
+                let encoded = command.split(' ').next_back();
+                let decoded = encoded.and_then(decode_powershell_script);
                 assert!(
-                    command.contains(action),
+                    decoded.as_deref().unwrap_or(command).contains(action),
                     "{event} command should run the {action} action: {command}"
                 );
             }
