@@ -932,7 +932,7 @@ mod tests {
         // marker must still be found inside the encoded payload so install
         // dedup, uninstall, and status checks locate the managed entry.
         let command = hook_command(
-            &Path::new(r"C:\Users\me\.codex\vintage-agent-state.ps1"),
+            Path::new(r"C:\Users\me\.codex\vintage-agent-state.ps1"),
             "working",
             "# vintage:codex:working",
         );
