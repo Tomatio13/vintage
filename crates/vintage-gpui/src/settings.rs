@@ -893,14 +893,34 @@ impl SettingsView {
             ))
             .child(
                 ui::hint(
-                    "Existing user configuration is preserved. Activity reporting is not available in this Preview yet.",
+                    "Existing user configuration is preserved. Managed lifecycle hooks report activity to the workspace.",
                     p,
                 )
                 .mb_4(),
             );
+        let mut notification_choices = div().flex().items_center().gap_2();
+        for (index, (enabled, label)) in [(true, "On"), (false, "Off")].into_iter().enumerate() {
+            notification_choices = notification_choices.child(
+                ui::choice(
+                    ("hook-notifications", index),
+                    label,
+                    self.draft.hook_notifications == enabled,
+                    p,
+                )
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.edit(|settings| settings.hook_notifications = enabled, cx)
+                })),
+            );
+        }
+        content = content.child(ui::card(p).mb_3().child(ui::field(
+            "Attention notifications",
+            "Show blocked agent requests in the workspace sidebar, pane, and notification card.",
+            notification_choices.into_any_element(),
+            p,
+        )));
         for (index, (agent, name, initials, description)) in [
             ("codex", "Codex", "Cx", "Managed session-start hook"),
-            ("claude", "Claude Code", "Cl", "Managed session-start hook"),
+            ("claude", "Claude Code", "Cl", "Managed lifecycle hooks"),
             ("opencode", "OpenCode", "Op", "Managed lifecycle plugin"),
         ]
         .into_iter()
@@ -967,6 +987,14 @@ impl SettingsView {
                                     },
                                     p,
                                 ))
+                                .when(installed, |row| {
+                                    row.child(
+                                        ui::action(("refresh-integration", index), "Refresh", p)
+                                            .on_click(cx.listener(move |view, _, _, cx| {
+                                                view.change_integration(agent, true, cx)
+                                            })),
+                                    )
+                                })
                                 .when(!conflict, |row| {
                                     row.child(
                                         ui::primary(

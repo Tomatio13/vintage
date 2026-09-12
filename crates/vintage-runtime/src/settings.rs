@@ -29,6 +29,10 @@ pub const ACTIONS: [&str; 9] = [
     "Split down",
 ];
 
+fn default_hook_notifications() -> bool {
+    true
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Appearance {
     #[default]
@@ -101,6 +105,8 @@ pub struct Settings {
     pub scrollback: usize,
     pub shell: String,
     pub bindings: [Binding; 9],
+    #[serde(default = "default_hook_notifications")]
+    pub hook_notifications: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -114,6 +120,7 @@ impl Default for Settings {
             scrollback: 1000,
             shell: crate::default_shell_id().into(),
             bindings: default_bindings(),
+            hook_notifications: true,
         }
     }
 }
@@ -367,6 +374,13 @@ mod tests {
         assert_eq!(settings.bindings[7].label(), "Ctrl+Shift+d");
         assert_eq!(settings.bindings[8].label(), "Ctrl+Shift+t");
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn missing_hook_notification_preference_defaults_to_enabled() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("hook_notifications");
+        let settings: Settings = serde_json::from_value(value).unwrap();
+        assert!(settings.hook_notifications);
     }
     #[test]
     fn save_reload_replace_and_damaged_recovery() {

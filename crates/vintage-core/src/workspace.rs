@@ -143,6 +143,16 @@ impl Workspaces {
         let w = self.current()?;
         w.tabs.iter().find(|t| Some(t.id) == w.active_tab)
     }
+    /// Returns the workspace and tab that own a live pane.
+    pub fn pane_location(&self, pane: Id) -> Option<(Id, Id)> {
+        self.items.iter().find_map(|workspace| {
+            workspace
+                .tabs
+                .iter()
+                .find(|tab| tab.layout.panes().contains(&pane))
+                .map(|tab| (workspace.id, tab.id))
+        })
+    }
     fn current_mut(&mut self) -> Option<&mut Workspace> {
         self.items.iter_mut().find(|w| Some(w.id) == self.active)
     }
@@ -330,6 +340,26 @@ mod tests {
         s.navigate(4);
         assert_eq!(s.active, Some(b));
         assert_eq!(s.pane_count(), 4);
+    }
+    #[test]
+    fn pane_location_finds_inactive_tabs_and_workspaces() {
+        let mut state = Workspaces::default();
+        let first_workspace = state.add_workspace("/a".into()).unwrap();
+        let first_tab = state.tab().unwrap().id;
+        let first_pane = state.tab().unwrap().active_pane;
+        let second_workspace = state.add_workspace("/b".into()).unwrap();
+        let second_tab = state.tab().unwrap().id;
+        let second_pane = state.tab().unwrap().active_pane;
+
+        assert_eq!(
+            state.pane_location(first_pane),
+            Some((first_workspace, first_tab))
+        );
+        assert_eq!(
+            state.pane_location(second_pane),
+            Some((second_workspace, second_tab))
+        );
+        assert_eq!(state.pane_location(999), None);
     }
     #[test]
     fn recursive_splits_collapse_and_last_close_leaves_empty_workspace() {
