@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/vintage-core", "crates/vintage-terminal", "crates/vintage-runtime", "crates/vintage-gpui"]
+default-members = ["crates/vintage-core", "crates/vintage-terminal", "crates/vintage-runtime", "crates/vintage-gpui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+alacritty_terminal = "=0.25.1"
+portable-pty = "=0.9.0"
+gpui = { git = "https://github.com/zed-industries/zed", rev = "7c07887d9555953bca7fe78417602114092ef8c8" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7c07887d9555953bca7fe78417602114092ef8c8", features = ["x11", "wayland"] }

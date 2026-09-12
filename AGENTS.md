@@ -12,23 +12,11 @@
 
 ## Repository map
 
-- `src/App.tsx` is a thin shell: appearance, font scale, updates, and the settings view. It owns no conversation state.
-- `src/workspace/` owns the terminal workspace: pure state model (`types.ts`, `paneLayout.ts`, `agentState.ts`, `paneRuntime.ts`), persistence mirrors (`persistence.ts`), screen-manifest detection (`screenDetection.ts`, `manifests/*.json`), the layout hook, and the UI (`WorkspaceApp.tsx`, `WorkspaceSidebar.tsx`, `WorkspaceTabs.tsx`, `SplitPaneView.tsx`, `PaneTerminal.tsx`, `WorkspaceFilesPanel.tsx`). Keep pure modules free of React and Tauri so the Node test runner covers them.
-- `src/terminal/TerminalSurface.tsx` owns the xterm.js lifecycle and live bottom-buffer snapshots.
-- `src/FileExplorer.tsx` owns the workspace file tree and live refresh; `src/files/FilePreview.tsx` owns preview rendering.
-- `src/host/index.ts` owns typed renderer access to Tauri commands and host events; keep raw command and event names there. `src/host/types.ts` holds the wire DTOs.
-- `src/settings/` owns the Application and Appearance settings UI.
-- `src-tauri/src/lib.rs` owns Tauri command registration, updates, and application lifecycle.
-- `src-tauri/src/shells.rs` owns shell detection, executable validation, and command construction (POSIX quoting, PowerShell EncodedCommand).
-- `src-tauri/src/workspaces.rs` owns the workspace registry and `workspace-layouts.json` persistence with validation.
-- `src-tauri/src/terminal.rs` owns PTY creation, I/O, resize, teardown, agent presets, and screen-state reporting.
-- `src-tauri/src/file_manager.rs` owns workspace-scoped listing, preview, folder opening, and watching.
-- `src-tauri/src/hook_ipc.rs` owns the local hook/plugin IPC server and token validation.
-- `src-tauri/src/integrations.rs` owns hook/plugin asset install, update, and uninstall.
-- Keep process, filesystem, and agent CLI access inside the Tauri host.
-- Expose host functionality to the renderer through typed Tauri commands and events.
-- Route renderer command calls and host event subscriptions through `src/host/index.ts` instead of scattering raw Tauri names across components.
-## Workflow
+- The experimental native workspace lives in `crates/vintage-{core,terminal,runtime,gpui}`; route native process and filesystem operations through `vintage-runtime`, never through GPUI render or input callbacks.
+- `crates/vintage-core/src/workspace.rs` owns the pure native workspace/tab/split model; keep OS and GPUI access out of it.
+- `crates/vintage-runtime/src/files.rs` owns registered, read-only native file access; `crates/vintage-gpui/src/files.rs` owns the file tree and preview tasks, and `crates/vintage-core/src/document.rs` prepares bounded document display data.
+- `crates/vintage-runtime/src/native_sessions.rs` owns startup and cleanup workers; `crates/vintage-runtime/src/hook_ipc.rs` owns authenticated loopback reports; `crates/vintage-gpui/src/workspace.rs` owns workspace chrome and terminal view entities.
+- ## Workflow
 
 - Accept community bug reports, feature requests, and documentation proposals through GitHub Issues.
 - Do not ask an external contributor to open a pull request until a maintainer has accepted the issue and agreed on its scope.
@@ -40,21 +28,23 @@
 ## Commands
 
 - Install dependencies: `pnpm install`
-- Run the web UI: `pnpm dev`
-- Run the desktop app: `pnpm tauri dev`
-- Run the frontend typecheck and build: `pnpm build`
-- Run workspace pure-model tests: `pnpm test:workspace`
-- Run agent state and screen-detection tests: `pnpm test:agents`
-- Run appearance and font-scale tests: `pnpm test:ui`
-- Run all Rust unit tests: `pnpm test:rust`
-- Run Rust compilation checks: `pnpm check:rust`
-- Run frontend and Rust checks: `pnpm check`
-- Check Rust formatting: `cargo fmt --manifest-path src-tauri/Cargo.toml --check`
+- Run the native desktop app: `cargo +1.95.0 run -p vintage-gpui --locked --`
+- Build the native desktop app: `cargo +1.95.0 build -p vintage-gpui --release --locked`
+- Run all native checks: `cargo +1.95.0 fmt --all --check && cargo +1.95.0 clippy --workspace --all-targets --locked -- -D warnings && cargo +1.95.0 test --workspace --locked`
+- Build the Debian package: `tools/package-gpui-deb.sh`
 
 ## Architecture constraints
 
 - Do not access processes or the filesystem directly from the React renderer.
-- Run agent CLIs and shells only through the Tauri Rust host PTY commands; the renderer never spawns processes.
+- In the native spike, own PTYs and terminal models in the runtime service; parse output and perform PTY I/O on workers, and explicitly join shutdown outside the GPUI main thread.
+- On native session shutdown, cancel blocked PTY readiness waits before joining workers outside the GPUI main thread.
+- Keep hidden native tabs alive; close their PTYs only when their pane, tab, workspace or application is closed, and join startup/cleanup workers outside the UI thread.
+- Keep native view refresh tasks owned by the view; coalesce wakeups without carrying PTY bytes, and close update listeners when the session stops.
+- The native boundary is a same-process module boundary, not process isolation; validate native service inputs and strip inherited production Hook credentials before launching a spike shell.
+- Resolve native file requests through the registered workspace file service and normalized relative paths; reject canonical paths outside its root and nonregular preview targets.
+- Keep native file reads and directory enumeration on workers; revoke the file service and cancel view tasks on Files close or workspace switch, and never pass filesystem paths or remote URLs to GPUI image loaders.
+- Keep native preferences in `vintage-runtime/src/settings.rs`, validate reads and writes, and save atomically on workers to the Preview-specific settings directory.
+- Keep the native spike independent of production application data and update channels; it must not import data or install integrations automatically.
 - Resolve workspace file operations in the Rust host from the registered workspace id only; accept normalized relative paths, and reject canonical targets outside that workspace root.
 - Keep file preview size limits, filesystem watching, and system file-manager launching in `src-tauri/src/file_manager.rs`.
 - Validate shell executables (regular file, executable bit on Unix, PATHEXT extension on Windows) before trusting renderer-supplied custom paths.
@@ -67,7 +57,12 @@
 ## Verification
 
 - After changing application code, run `pnpm check` and the Rust formatting check.
-- When changing split-tree or agent-state logic, add pure TypeScript tests under `tests/` and run `pnpm test:workspace` / `pnpm test:agents`.
+- When changing native settings, test value limits, shortcut conflicts, damaged-file recovery and failed atomic saves; verify live application and restart restoration separately.
+- When changing `crates/` or shared shell code, also run `pnpm check:gpui`; Windows and Linux GUI/IME checks remain distinct from compilation and unit tests.
+- When changing `tools/performance/`, run its Python unit tests and verify only synthetic terminal data is captured.
+- When changing production split-tree or agent-state logic, add pure TypeScript tests under `tests/` and run `pnpm test:workspace` / `pnpm test:agents`.
+- When changing native file access, test workspace identity, traversal/symlink rejection, regular-file checks, byte limits and revoked access; use only synthetic file contents for GUI captures.
+- When changing native workspace layout or lifecycle, add Rust model/runtime tests and exercise tab switching, recursive split collapse and terminal cleanup with synthetic PTYs.
 - When porting or editing screen manifests, keep priority, region, conditions, and visible flags intact and cover the rules in `tests/screenDetection.test.ts`.
 - When changing shell detection or command construction, add Rust tests covering Windows and Unix branches (runnable on any OS via injected inputs).
 - When changing workspace persistence, add Rust and/or TypeScript tests covering validation limits, migration, atomic writes, and damaged-file recovery.

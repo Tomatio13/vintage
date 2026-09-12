@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=VINTAGE GPUI
+Comment=Native terminal workspace for coding agents
+Exec=vintage-gpui
+Icon=dev.tiebi.vintage.gpui
+Terminal=false
+Categories=Development;System;TerminalEmulator;
+Keywords=terminal;workspace;agent;coding;
+StartupNotify=true
+StartupWMClass=dev.tiebi.vintage.gpui
