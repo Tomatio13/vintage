@@ -37,6 +37,7 @@ pub struct WorkspaceView {
     rename: Option<(Id, Composition)>,
     rename_focus: FocusHandle,
     hook_activity: BTreeMap<Id, String>,
+    block_notice: Option<Id>,
     _hook_task: gpui::Task<()>,
 }
 
@@ -72,6 +73,15 @@ impl WorkspaceView {
                 window,
                 |view, _, event: &crate::settings::Saved, window, cx| {
                     cx.set_global(crate::theme::Preferences(event.0.clone()));
+                    if !event.0.hook_notifications {
+                        view.block_notice = None;
+                    } else if view.block_notice.is_none() {
+                        view.block_notice = view
+                            .hook_activity
+                            .iter()
+                            .find(|(_, state)| state.as_str() == "blocked")
+                            .map(|(pane, _)| *pane);
+                    }
                     window.set_rem_size(px(16. * event.0.ui_percent as f32 / 100.));
                     view.shell = event.0.shell.clone();
                     let installed = cx.text_system().all_font_names();
@@ -128,12 +138,29 @@ impl WorkspaceView {
             if entity
                 .update(cx, |view, cx| {
                     if view.terminals.contains_key(&event.pane) {
+                        let was_blocked = view.hook_activity.get(&event.pane).map(String::as_str)
+                            == Some("blocked");
                         match event.state.as_deref() {
                             Some("released") | None => {
                                 view.hook_activity.remove(&event.pane);
+                                if view.block_notice == Some(event.pane) {
+                                    view.block_notice = None;
+                                }
                             }
                             Some(state) => {
                                 view.hook_activity.insert(event.pane, state.to_string());
+                                if state == "blocked"
+                                    && cx
+                                        .global::<crate::theme::Preferences>()
+                                        .0
+                                        .hook_notifications
+                                    && !was_blocked
+                                {
+                                    view.block_notice = Some(event.pane);
+                                }
+                                if state != "blocked" && view.block_notice == Some(event.pane) {
+                                    view.block_notice = None;
+                                }
                             }
                         }
                         cx.notify();
@@ -166,6 +193,7 @@ impl WorkspaceView {
             rename: None,
             rename_focus: cx.focus_handle(),
             hook_activity: BTreeMap::new(),
+            block_notice: None,
             _hook_task: hook_task,
         };
         view.model
@@ -194,6 +222,10 @@ impl WorkspaceView {
             .collect();
         for id in removed {
             self.terminals.remove(&id);
+            self.hook_activity.remove(&id);
+            if self.block_notice == Some(id) {
+                self.block_notice = None;
+            }
             self.sessions.close(id);
         }
         for (id, root) in panes {
@@ -342,6 +374,20 @@ impl WorkspaceView {
         self.model.close_workspace(id);
         self.error = None;
         self.synchronize(window, cx);
+    }
+    fn show_blocked_pane(&mut self, pane: Id, window: &mut Window, cx: &mut Context<Self>) {
+        self.block_notice = None;
+        if let Some((workspace, tab)) = self.model.pane_location(pane) {
+            self.model.activate(workspace, Some(tab));
+            self.model.focus(pane);
+            self.synchronize_files(cx);
+            self.focus_active(window, cx);
+        }
+        cx.notify();
+    }
+    fn dismiss_block_notice(&mut self, cx: &mut Context<Self>) {
+        self.block_notice = None;
+        cx.notify();
     }
     fn open_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.picker_pending {
@@ -516,12 +562,22 @@ impl WorkspaceView {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let rgb = |value| palette.color(value);
+        let notifications_enabled = cx
+            .global::<crate::theme::Preferences>()
+            .0
+            .hook_notifications;
         match layout {
             Layout::Pane(id) => {
                 let id = *id;
                 let active = self.model.tab().is_some_and(|t| t.active_pane == id);
                 let terminal = self.terminals.get(&id).expect("pane has a view").clone();
                 let activity = self.hook_activity.get(&id).map(String::as_str);
+                let activity = if !notifications_enabled && activity == Some("blocked") {
+                    None
+                } else {
+                    activity
+                };
+                let blocked = activity == Some("blocked");
                 div()
                     .id(("pane", id))
                     .flex_1()
@@ -533,7 +589,13 @@ impl WorkspaceView {
                     .border_1()
                     .rounded_sm()
                     .overflow_hidden()
-                    .border_color(rgb(if active { 0x8c754e } else { 0x302d27 }))
+                    .border_color(rgb(if blocked {
+                        0xe8aa82
+                    } else if active {
+                        0x8c754e
+                    } else {
+                        0x302d27
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |view, _, window, cx| {
@@ -550,7 +612,7 @@ impl WorkspaceView {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .bg(rgb(0x201f1c))
+                            .bg(rgb(if blocked { 0x3b2922 } else { 0x201f1c }))
                             .child(
                                 div()
                                     .flex_1()
@@ -621,6 +683,27 @@ impl Render for WorkspaceView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = crate::theme::Palette::new(window, cx);
         let rgb = |value| palette.color(value);
+        let notifications_enabled = cx
+            .global::<crate::theme::Preferences>()
+            .0
+            .hook_notifications;
+        let blocked_panes: Vec<_> = self
+            .hook_activity
+            .iter()
+            .filter(|(_, state)| notifications_enabled && state.as_str() == "blocked")
+            .filter_map(|(pane, _)| {
+                self.model
+                    .pane_location(*pane)
+                    .and_then(|(workspace, tab)| {
+                        self.model
+                            .items
+                            .iter()
+                            .find(|item| item.id == workspace)
+                            .and_then(|item| item.tabs.iter().find(|item| item.id == tab))
+                            .map(|tab| (*pane, tab.title.clone()))
+                    })
+            })
+            .collect();
         let mut sidebar = div()
             .id("workspaces-list")
             .flex_1()
@@ -628,6 +711,52 @@ impl Render for WorkspaceView {
             .overflow_y_scroll()
             .px_3()
             .py_2();
+        if !blocked_panes.is_empty() {
+            let mut notices = div()
+                .mb_3()
+                .p_2()
+                .rounded_md()
+                .bg(rgb(0x2b201c))
+                .border_1()
+                .border_color(rgb(0xe8aa82))
+                .child(
+                    div()
+                        .mb_2()
+                        .text_size(gpui::rems(0.6875))
+                        .text_color(rgb(0xf2c3a8))
+                        .child("NEEDS YOUR INPUT"),
+                );
+            for (pane, title) in &blocked_panes {
+                let pane = *pane;
+                notices = notices.child(
+                    div()
+                        .id(("blocked-pane", pane))
+                        .mb_1()
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .bg(rgb(0x3b2922))
+                        .hover(|style| style.bg(rgb(0x5a3829)))
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            view.show_blocked_pane(pane, window, cx)
+                        }))
+                        .child(
+                            div()
+                                .text_size(gpui::rems(0.75))
+                                .text_color(rgb(0xf2c3a8))
+                                .child(format!("!  {title}")),
+                        )
+                        .child(
+                            div()
+                                .text_size(gpui::rems(0.6875))
+                                .text_color(rgb(0xc6a66b))
+                                .child("Open terminal →"),
+                        ),
+                );
+            }
+            sidebar = sidebar.child(notices);
+        }
         for workspace in &self.model.items {
             let id = workspace.id;
             let active = self.model.active == Some(id);
@@ -667,6 +796,12 @@ impl Render for WorkspaceView {
             );
             for tab in &workspace.tabs {
                 let tab_id = tab.id;
+                let activity = self.activity_for_panes(tab.layout.panes());
+                let activity = if !notifications_enabled && activity == Some("blocked") {
+                    None
+                } else {
+                    activity
+                };
                 group = group.child(
                     div()
                         .id(("sidebar-tab", tab_id))
@@ -685,7 +820,7 @@ impl Render for WorkspaceView {
                         }))
                         .child(format!(
                             "{}  {}  ·  {}",
-                            Self::activity_mark(self.activity_for_panes(tab.layout.panes())),
+                            Self::activity_mark(activity),
                             tab.title,
                             tab.layout.panes().len()
                         )),
@@ -707,6 +842,11 @@ impl Render for WorkspaceView {
             for tab in &workspace.tabs {
                 let id = tab.id;
                 let activity = self.activity_for_panes(tab.layout.panes());
+                let activity = if !notifications_enabled && activity == Some("blocked") {
+                    None
+                } else {
+                    activity
+                };
                 tabs =
                     tabs.child(
                         div()
@@ -830,6 +970,19 @@ impl Render for WorkspaceView {
             button("new-tab", "+")
                 .on_click(cx.listener(|view, _, window, cx| view.add_tab(window, cx))),
         );
+        let block_notice = self
+            .block_notice
+            .filter(|_| notifications_enabled)
+            .and_then(|pane| {
+                self.model.pane_location(pane).and_then(|(workspace, tab)| {
+                    self.model
+                        .items
+                        .iter()
+                        .find(|item| item.id == workspace)
+                        .and_then(|item| item.tabs.iter().find(|item| item.id == tab))
+                        .map(|tab| (pane, tab.title.clone()))
+                })
+            });
         let content = if let Some(tab) = self.model.tab() {
             self.pane_layout(&tab.layout, palette, cx)
         } else {
@@ -1163,6 +1316,72 @@ impl Render for WorkspaceView {
                                         )
                                     }),
                             ),
+                        ),
+                )
+            })
+            .when_some(block_notice, |root, (pane, title)| {
+                root.child(
+                    div()
+                        .id(("blocked-notice", pane))
+                        .absolute()
+                        .right(px(24.))
+                        .bottom(px(24.))
+                        .w(px(336.))
+                        .p_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(0xe8aa82))
+                        .bg(rgb(0x2b201c))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            view.show_blocked_pane(pane, window, cx)
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .items_start()
+                                .justify_between()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .text_size(gpui::rems(0.8125))
+                                                .text_color(rgb(0xf2c3a8))
+                                                .child("Input required"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(gpui::rems(0.75))
+                                                .text_color(rgb(0xd3c5b8))
+                                                .child(format!(
+                                                    "{title} is waiting for your response."
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt_1()
+                                                .text_size(gpui::rems(0.75))
+                                                .text_color(rgb(0xc6a66b))
+                                                .child("Show terminal →"),
+                                        ),
+                                )
+                                .child(
+                                    button(("dismiss-blocked-notice", pane), "×")
+                                        .flex_none()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            cx.stop_propagation();
+                                            view.dismiss_block_notice(cx);
+                                        })),
+                                ),
                         ),
                 )
             })

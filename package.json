@@ -1,7 +1,7 @@
 {
   "name": "vintage",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Native GPUI workspace for terminal agents.",
   "scripts": {
     "dev": "cargo +1.95.0 run -p vintage-gpui --locked --",

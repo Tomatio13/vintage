@@ -338,13 +338,14 @@ const CODEX_HOOK_EVENTS: &[(&str, &str)] = &[
     ("Stop", "idle"),
 ];
 
-/// Claude Code hook events and the state action each reports. Same mapping as
-/// Codex; Claude Code has no PermissionRequest event, so blocked is not wired
-/// here.
+/// Claude Code hook events and the state action each reports. PermissionRequest
+/// is emitted when Claude Code displays a permission prompt, so it maps to
+/// blocked and keeps the VINTAGE attention UI visible until the prompt resolves.
 const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session"),
     ("UserPromptSubmit", "working"),
     ("PreToolUse", "working"),
+    ("PermissionRequest", "blocked"),
     ("PostToolUse", "working"),
     ("SessionEnd", "released"),
     ("Stop", "idle"),
