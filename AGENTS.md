@@ -32,6 +32,7 @@
 - Build the native desktop app: `cargo +1.95.0 build -p vintage-gpui --release --locked`
 - Run all native checks: `cargo +1.95.0 fmt --all --check && cargo +1.95.0 clippy --workspace --all-targets --locked -- -D warnings && cargo +1.95.0 test --workspace --locked`
 - Build the Debian package: `tools/package-gpui-deb.sh`
+- Build the AppImage: `tools/package-gpui-appimage.sh`
 
 ## Architecture constraints
 

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main, develop]
-    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "packaging/**", "tools/package-gpui-deb.sh", ".github/workflows/gpui-preview.yml"]
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "packaging/**", "tools/package-gpui-deb.sh", "tools/package-gpui-appimage.sh", ".github/workflows/gpui-preview.yml"]
   pull_request:
     branches: [main, develop]
 

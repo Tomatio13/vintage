@@ -44,6 +44,6 @@ sed \
 rm "$staging_dir/DEBIAN/control.in"
 
 mkdir -p "$output_dir"
-package_path="$output_dir/vintage-gpui_${version}_${architecture}.deb"
+package_path="$output_dir/VINTAGE_${version}_${architecture}.deb"
 dpkg-deb --build --root-owner-group "$staging_dir" "$package_path" >/dev/null
 printf '%s\n' "$package_path"

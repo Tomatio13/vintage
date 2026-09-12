@@ -8,4 +8,4 @@ Depends: libfontconfig1, libfreetype6, libxcb1, libxkbcommon0, libxkbcommon-x11-
 Description: VINTAGE native terminal workspace
  VINTAGE is a native GPUI terminal workspace for running shell and coding-agent sessions.
  .
- This package is the GPUI candidate and installs alongside the legacy Tauri edition.
+ This package is the native VINTAGE desktop application.
