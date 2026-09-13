@@ -4,7 +4,7 @@ members = ["crates/vintage-core", "crates/vintage-terminal", "crates/vintage-run
 default-members = ["crates/vintage-core", "crates/vintage-terminal", "crates/vintage-runtime", "crates/vintage-gpui"]
 
 [workspace.package]
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
