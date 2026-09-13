@@ -1,4 +1,5 @@
 //! Native workspace Preview, deliberately separate from production data.
+mod boxes;
 mod files;
 mod settings;
 mod settings_ui;
@@ -8,21 +9,23 @@ mod window_frame;
 mod workspace;
 
 use gpui::{
-    actions, div, fill, font, point, prelude::*, px, relative, rgb, size, svg, App, AssetSource,
-    Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, FontStyle, FontWeight, GlobalElementId, InspectorElementId, KeyDownEvent,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, ShapedLine, Style, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle, Window, WindowBounds, WindowOptions,
+    actions, div, fill, font, point, prelude::*, px, relative, rgb, rgba, size, svg, App,
+    AssetSource, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, FontStyle, FontWeight, GlobalElementId, InspectorElementId,
+    KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder,
+    Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Style, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
 };
 use std::{
     borrow::Cow,
+    collections::HashMap,
     ops::Range,
     path::PathBuf,
+    rc::Rc,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use text_cache::TextCache;
+use text_cache::{StyleKey, TextCache};
 use vintage_core::composition::Composition;
 use vintage_core::focus::FocusReporter;
 use vintage_core::mouse::{Button, MouseAction};
@@ -34,6 +37,9 @@ use vintage_runtime::{
 use vintage_terminal::Snapshot;
 
 actions!(preview, [Quit]);
+
+const DEFAULT_BACKGROUND: u32 = 0x191816;
+const SELECTED_BACKGROUND: u32 = 0x514736;
 
 struct Assets;
 
@@ -67,9 +73,12 @@ struct TerminalView {
     cell_width: Pixels,
     line_height: Pixels,
     bounds: Option<Bounds<Pixels>>,
+    /// Physical-pixel-aligned origin of the terminal grid inside `bounds`.
+    origin: Point<Pixels>,
     composition: Composition,
     preedit_layout: Option<ShapedLine>,
     text_cache: TextCache<ShapedLine>,
+    box_glyphs: HashMap<(u32, u32, u32, u32), Option<Rc<boxes::Glyph>>>,
     selecting: Option<(usize, usize)>,
     scroll_remainder: f32,
     reported_buttons: [bool; 3],
@@ -146,9 +155,11 @@ impl TerminalView {
             cell_width: px(8.),
             line_height: px(18.),
             bounds: None,
+            origin: point(px(0.), px(0.)),
             composition: Composition::default(),
             preedit_layout: None,
             text_cache: TextCache::default(),
+            box_glyphs: HashMap::new(),
             selecting: None,
             scroll_remainder: 0.,
             reported_buttons: [false; 3],
@@ -334,11 +345,11 @@ impl TerminalView {
         }
     }
     fn cell_at(&self, point: Point<Pixels>) -> Option<(usize, usize)> {
-        let bounds = self.bounds?;
-        let column = ((point.x - bounds.left()) / self.cell_width)
+        self.bounds.as_ref()?;
+        let column = ((point.x - self.origin.x) / self.cell_width)
             .floor()
             .max(0.) as usize;
-        let row = ((point.y - bounds.top()) / self.line_height)
+        let row = ((point.y - self.origin.y) / self.line_height)
             .floor()
             .max(0.) as usize;
         Some((
@@ -482,11 +493,10 @@ impl TerminalView {
     }
     fn cursor_bounds(&self) -> Option<Bounds<Pixels>> {
         let (column, row) = self.snapshot.as_ref()?.cursor?;
-        let bounds = self.bounds?;
         Some(Bounds::new(
             point(
-                bounds.left() + self.cell_width * column as f32,
-                bounds.top() + self.line_height * row as f32,
+                self.origin.x + self.cell_width * column as f32,
+                self.origin.y + self.line_height * row as f32,
             ),
             size(self.cell_width, self.line_height),
         ))
@@ -588,8 +598,20 @@ struct TerminalElement {
     view: Entity<TerminalView>,
 }
 struct PaintState {
-    lines: Vec<(ShapedLine, Point<Pixels>)>,
+    runs: Vec<(ShapedLine, Point<Pixels>)>,
+    glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)>,
 }
+/// One stretch of same-style cells shaped together; every cell contributes
+/// exactly one glyph so GPUI can snap advances to the cell grid.
+struct Run {
+    row: usize,
+    column: usize,
+    cells: usize,
+    text: String,
+    style: StyleKey,
+    force_width: Option<Pixels>,
+}
+
 impl IntoElement for TerminalElement {
     type Element = Self;
     fn into_element(self) -> Self {
@@ -627,15 +649,24 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) -> PaintState {
         self.view.update(cx, |view, cx| {
+            let scale = window.scale_factor();
             let base_font = font(view.font_family.clone());
             let font_id = window.text_system().resolve_font(&base_font);
-            let cell_width = window
+            let advance = window
                 .text_system()
                 .advance(font_id, px(view.font_size), 'M')
                 .map(|s| s.width)
                 .unwrap_or(px(view.font_size * 0.6));
-            let line_height = px((view.font_size * 1.5).ceil());
+            // Whole physical pixels keep glyphs, strokes, and backgrounds on
+            // one pixel grid instead of drifting by fractions of a cell.
+            let cell_width = px((f32::from(advance) * scale).round().max(1.) / scale);
+            let line_height = px(((view.font_size * 1.5).ceil() * scale).round() / scale);
+            let origin = point(
+                px((f32::from(bounds.origin.x) * scale).round() / scale),
+                px((f32::from(bounds.origin.y) * scale).round() / scale),
+            );
             view.bounds = Some(bounds);
+            view.origin = origin;
             view.cell_width = cell_width;
             view.line_height = line_height;
             let columns = (bounds.size.width / cell_width).floor().clamp(2., 500.) as u16;
@@ -654,52 +685,135 @@ impl Element for TerminalElement {
             {
                 view.requested_size = dimensions;
             }
-            view.text_cache
-                .begin_frame(view.font_size, window.scale_factor());
-            let mut lines = Vec::new();
+            view.text_cache.begin_frame(view.font_size, scale);
+            let mut runs: Vec<(ShapedLine, Point<Pixels>)> = Vec::new();
+            let mut glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)> = Vec::new();
             if let Some(snapshot) = &view.snapshot {
+                let cache = &mut view.text_cache;
+                let font_size = view.font_size;
+                // Terminate the open run by shaping it into `runs`.
+                let mut flush = |run: &mut Option<Run>| {
+                    if let Some(run) = run.take() {
+                        let at = point(
+                            origin.x + cell_width * run.column as f32,
+                            origin.y + line_height * run.row as f32,
+                        );
+                        let line = cache.layout(&run.text, run.style, || {
+                            shape_run(
+                                window,
+                                &run.text,
+                                run.style,
+                                &base_font,
+                                font_size,
+                                run.force_width,
+                            )
+                        });
+                        runs.push((line, at));
+                    }
+                };
+                let mut run: Option<Run> = None;
+                let mut open_row: Option<usize> = None;
                 for cell in &snapshot.cells {
-                    if cell.text.trim().is_empty() {
+                    if open_row != Some(cell.row) {
+                        flush(&mut run);
+                        open_row = Some(cell.row);
+                    }
+                    let (row, column, width) = (cell.row, cell.column, cell.width.max(1));
+                    let style = StyleKey {
+                        foreground: cell.foreground,
+                        bold: cell.bold,
+                        italic: cell.italic,
+                        underline: cell.underline,
+                        strikeout: cell.strikeout,
+                    };
+                    let first = cell.text.chars().next();
+                    if first.is_some_and(boxes::is_drawn) {
+                        flush(&mut run);
+                        let ch = first.unwrap();
+                        let key = (
+                            ch as u32,
+                            f32::from(cell_width).to_bits(),
+                            f32::from(line_height).to_bits(),
+                            scale.to_bits(),
+                        );
+                        let entry = view
+                            .box_glyphs
+                            .entry(key)
+                            .or_insert_with(|| {
+                                boxes::glyph(ch, cell_width, line_height, scale).map(Rc::new)
+                            })
+                            .clone();
+                        if let Some(glyph) = entry {
+                            glyphs.push((
+                                glyph,
+                                point(
+                                    origin.x + cell_width * column as f32,
+                                    origin.y + line_height * row as f32,
+                                ),
+                                cell.foreground,
+                            ));
+                        }
                         continue;
                     }
-                    let line = view.text_cache.layout(cell, || {
-                        let mut font = base_font.clone();
-                        if cell.bold {
-                            font.weight = FontWeight::BOLD;
+                    let blank = !cell.underline
+                        && !cell.strikeout
+                        && cell.text.chars().all(char::is_whitespace);
+                    if blank {
+                        // Blanks only join a run that paints nothing over
+                        // them, and keep the run's cell count aligned.
+                        match &mut run {
+                            Some(active)
+                                if active.row == row
+                                    && active.column + active.cells == column
+                                    && !active.style.underline
+                                    && !active.style.strikeout =>
+                            {
+                                active.cells += 1;
+                                active.text.push(' ');
+                            }
+                            _ => flush(&mut run),
                         }
-                        if cell.italic {
-                            font.style = FontStyle::Italic;
+                        continue;
+                    }
+                    // Wide characters and combining sequences shape on their
+                    // own so every run glyph stays one cell wide.
+                    let solo = width != 1 || cell.text.chars().count() != 1;
+                    if solo {
+                        flush(&mut run);
+                        let mut solo = Some(Run {
+                            row,
+                            column,
+                            cells: 1,
+                            text: cell.text.clone(),
+                            style,
+                            force_width: None,
+                        });
+                        flush(&mut solo);
+                        continue;
+                    }
+                    match &mut run {
+                        Some(active)
+                            if active.row == row
+                                && active.column + active.cells == column
+                                && active.style == style =>
+                        {
+                            active.cells += 1;
+                            active.text.push_str(&cell.text);
                         }
-                        let run = TextRun {
-                            len: cell.text.len(),
-                            font,
-                            color: rgb(cell.foreground).into(),
-                            background_color: None,
-                            underline: cell.underline.then_some(UnderlineStyle {
-                                color: None,
-                                thickness: px(1.),
-                                wavy: false,
-                            }),
-                            strikethrough: cell.strikeout.then_some(gpui::StrikethroughStyle {
-                                color: None,
-                                thickness: px(1.),
-                            }),
-                        };
-                        window.text_system().shape_line(
-                            cell.text.clone().into(),
-                            px(view.font_size),
-                            &[run],
-                            None,
-                        )
-                    });
-                    lines.push((
-                        line,
-                        point(
-                            bounds.left() + cell_width * cell.column as f32,
-                            bounds.top() + line_height * cell.row as f32,
-                        ),
-                    ));
+                        _ => {
+                            flush(&mut run);
+                            run = Some(Run {
+                                row,
+                                column,
+                                cells: 1,
+                                text: cell.text.clone(),
+                                style,
+                                force_width: Some(cell_width),
+                            });
+                        }
+                    }
                 }
+                flush(&mut run);
             }
             view.text_cache.end_frame();
             view.preedit_layout = None;
@@ -724,10 +838,10 @@ impl Element for TerminalElement {
                         None,
                     );
                     view.preedit_layout = Some(line.clone());
-                    lines.push((line, cursor.origin));
+                    runs.push((line, cursor.origin));
                 }
             }
-            PaintState { lines }
+            PaintState { runs, glyphs }
         })
     }
     fn paint(
@@ -749,24 +863,32 @@ impl Element for TerminalElement {
             );
         }
         if let Some(snapshot) = &view.snapshot {
+            // Backgrounds paint first, merged into horizontal stretches.
+            let mut stretch: Option<(usize, usize, usize, u32)> = None;
             for cell in &snapshot.cells {
-                if cell.background != 0x191816 || cell.selected {
-                    let area = Bounds::new(
-                        point(
-                            bounds.left() + view.cell_width * cell.column as f32,
-                            bounds.top() + view.line_height * cell.row as f32,
-                        ),
-                        size(view.cell_width * cell.width as f32, view.line_height),
-                    );
-                    window.paint_quad(fill(
-                        area,
-                        rgb(if cell.selected {
-                            0x514736
-                        } else {
-                            cell.background
-                        }),
-                    ));
+                let color = if cell.selected {
+                    SELECTED_BACKGROUND
+                } else {
+                    cell.background
+                };
+                let paints = cell.selected || color != DEFAULT_BACKGROUND;
+                let extends = paints
+                    && matches!(&stretch, Some((row, start, len, drawn))
+                        if *row == cell.row && *start + *len == cell.column && *drawn == color);
+                if extends {
+                    if let Some((_, _, len, _)) = &mut stretch {
+                        *len += cell.width.max(1);
+                    }
+                    continue;
                 }
+                paint_stretch(window, view, &stretch);
+                stretch = paints.then(|| (cell.row, cell.column, cell.width.max(1), color));
+            }
+            paint_stretch(window, view, &stretch);
+            // Box drawing and block glyphs drawn as vectors over the
+            // backgrounds and under the text.
+            for (glyph, at, foreground) in &state.glyphs {
+                paint_glyph(window, glyph, *at, *foreground);
             }
             if window.is_window_active()
                 && view.focus.is_focused(window)
@@ -778,7 +900,7 @@ impl Element for TerminalElement {
             }
         }
         let line_height = view.line_height;
-        for (line, origin) in &state.lines {
+        for (line, origin) in &state.runs {
             if line
                 .paint(*origin, line_height, TextAlign::Left, None, window, cx)
                 .is_err()
@@ -788,6 +910,102 @@ impl Element for TerminalElement {
                     view.error = Some("Terminal text rendering failed".into())
                 });
             }
+        }
+    }
+}
+
+/// Shape one text run with the style applied to every cell.
+fn shape_run(
+    window: &mut Window,
+    text: &str,
+    style: StyleKey,
+    base_font: &gpui::Font,
+    font_size: f32,
+    force_width: Option<Pixels>,
+) -> ShapedLine {
+    let mut font = base_font.clone();
+    if style.bold {
+        font.weight = FontWeight::BOLD;
+    }
+    if style.italic {
+        font.style = FontStyle::Italic;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: rgb(style.foreground).into(),
+        background_color: None,
+        underline: style.underline.then_some(UnderlineStyle {
+            color: Some(rgb(style.foreground).into()),
+            thickness: px(1.),
+            wavy: false,
+        }),
+        strikethrough: style.strikeout.then_some(gpui::StrikethroughStyle {
+            color: None,
+            thickness: px(1.),
+        }),
+    };
+    window
+        .text_system()
+        .shape_line(text.to_owned().into(), px(font_size), &[run], force_width)
+}
+
+fn paint_stretch(
+    window: &mut Window,
+    view: &TerminalView,
+    stretch: &Option<(usize, usize, usize, u32)>,
+) {
+    let Some((row, column, len, color)) = stretch else {
+        return;
+    };
+    let area = Bounds::new(
+        point(
+            view.origin.x + view.cell_width * *column as f32,
+            view.origin.y + view.line_height * *row as f32,
+        ),
+        size(view.cell_width * *len as f32, view.line_height),
+    );
+    window.paint_quad(fill(area, rgb(*color)));
+}
+
+fn paint_glyph(window: &mut Window, glyph: &boxes::Glyph, at: Point<Pixels>, foreground: u32) {
+    let at = (f32::from(at.x), f32::from(at.y));
+    let at_point = |x: f32, y: f32| point(px(at.0 + x), px(at.1 + y));
+    for [x, y, width, height] in &glyph.rects {
+        window.paint_quad(fill(
+            Bounds::new(at_point(*x, *y), size(px(*width), px(*height))),
+            rgb(foreground),
+        ));
+    }
+    for ([x, y, width, height], alpha) in &glyph.tints {
+        window.paint_quad(fill(
+            Bounds::new(at_point(*x, *y), size(px(*width), px(*height))),
+            rgba((foreground << 8) | *alpha as u32),
+        ));
+    }
+    for stroke in &glyph.strokes {
+        let mut builder = PathBuilder::stroke(px(stroke.width));
+        if let Some(first) = stroke.points.first() {
+            builder.move_to(at_point(first[0], first[1]));
+        }
+        for point in stroke.points.iter().skip(1) {
+            builder.line_to(at_point(point[0], point[1]));
+        }
+        if let Ok(path) = builder.build() {
+            window.paint_path(path, rgb(foreground));
+        }
+    }
+    for polygon in &glyph.polygons {
+        let mut builder = PathBuilder::fill();
+        if let Some(first) = polygon.first() {
+            builder.move_to(at_point(first[0], first[1]));
+        }
+        for p in polygon.iter().skip(1) {
+            builder.line_to(at_point(p[0], p[1]));
+        }
+        builder.close();
+        if let Ok(path) = builder.build() {
+            window.paint_path(path, rgb(foreground));
         }
     }
 }

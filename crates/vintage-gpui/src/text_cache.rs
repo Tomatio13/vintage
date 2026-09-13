@@ -1,25 +1,26 @@
-//! Retain shaped text for the current visible cells only. Backgrounds, selection
-//! and cursor positions are painted separately and do not invalidate text.
-use vintage_terminal::Cell;
+//! Retain shaped text runs for the current visible frame only. Runs cover
+//! whole stretches of same-style cells, so rows shape once instead of once
+//! per cell. Backgrounds, selection and positions are painted separately and
+//! do not invalidate text.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StyleKey {
+    pub foreground: u32,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikeout: bool,
+}
 
 struct Entry<T> {
     text: String,
-    foreground: u32,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strikeout: bool,
+    style: StyleKey,
     layout: T,
 }
 
 impl<T> Entry<T> {
-    fn matches(&self, cell: &Cell) -> bool {
-        self.text == cell.text
-            && self.foreground == cell.foreground
-            && self.bold == cell.bold
-            && self.italic == cell.italic
-            && self.underline == cell.underline
-            && self.strikeout == cell.strikeout
+    fn matches(&self, text: &str, style: &StyleKey) -> bool {
+        self.text == text && self.style == *style
     }
 }
 
@@ -49,22 +50,18 @@ impl<T: Clone> TextCache<T> {
         self.next = 0;
     }
 
-    pub fn layout(&mut self, cell: &Cell, shape: impl FnOnce() -> T) -> T {
+    pub fn layout(&mut self, text: &str, style: StyleKey, shape: impl FnOnce() -> T) -> T {
         let index = self.next;
         self.next += 1;
         if let Some(entry) = self.entries.get(index) {
-            if entry.matches(cell) {
+            if entry.matches(text, &style) {
                 return entry.layout.clone();
             }
         }
         let layout = shape();
         let entry = Entry {
-            text: cell.text.clone(),
-            foreground: cell.foreground,
-            bold: cell.bold,
-            italic: cell.italic,
-            underline: cell.underline,
-            strikeout: cell.strikeout,
+            text: text.to_owned(),
+            style,
             layout: layout.clone(),
         };
         if index == self.entries.len() {
@@ -88,77 +85,86 @@ impl<T: Clone> TextCache<T> {
 mod tests {
     use super::*;
     use std::cell::Cell as Counter;
-    use vintage_core::TerminalSize;
-    use vintage_terminal::Terminal;
 
-    fn cell() -> Cell {
-        let mut terminal = Terminal::new(TerminalSize::new(80, 24).unwrap());
-        terminal.feed(b"A");
-        terminal.snapshot().cells.remove(0)
+    fn style() -> StyleKey {
+        StyleKey {
+            foreground: 0xe6e1d8,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikeout: false,
+        }
     }
 
     #[test]
     fn unchanged_screen_avoids_repeated_layout_calls() {
-        let cell = cell();
         let calls = Counter::new(0);
         let mut cache = TextCache::default();
         for _ in 0..10 {
             cache.begin_frame(12., 1.);
-            for _ in 0..80 * 24 {
-                cache.layout(&cell, || calls.set(calls.get() + 1));
+            for _ in 0..80 {
+                cache.layout("row", style(), || calls.set(calls.get() + 1));
             }
             cache.end_frame();
         }
-        assert_eq!(calls.get(), 80 * 24); // One screen, not ten screens.
+        assert_eq!(calls.get(), 80); // One screen, not ten screens.
     }
 
     #[test]
-    fn selection_background_and_position_do_not_invalidate_text() {
-        let mut cell = cell();
+    fn positions_and_unrelated_cells_do_not_invalidate_layout() {
         let mut cache = TextCache::default();
         cache.begin_frame(12., 1.);
-        cache.layout(&cell, || 7);
+        cache.layout("first", style(), || 7);
+        cache.layout("second", style(), || 8);
         cache.end_frame();
-        cell.selected = true;
-        cell.background = 0x123456;
-        cell.row = 2;
-        cell.column = 3;
         cache.begin_frame(12., 1.);
-        assert_eq!(cache.layout(&cell, || panic!("unnecessary layout")), 7);
+        // Layout order stays positional: the same text in the same slot hits.
+        assert_eq!(
+            cache.layout("first", style(), || panic!("unnecessary layout")),
+            7
+        );
+        assert_eq!(
+            cache.layout("second", style(), || panic!("unnecessary layout")),
+            8
+        );
         cache.end_frame();
     }
 
     #[test]
     fn text_and_each_style_change_invalidates_layout() {
-        let original = cell();
-        let mut variants = vec![original.clone(); 6];
-        variants[0].text = "日\u{301}".into();
-        variants[1].foreground ^= 1;
-        variants[2].bold = true;
-        variants[3].italic = true;
-        variants[4].underline = true;
-        variants[5].strikeout = true;
+        let mut variants = vec![style(); 5];
+        variants[0].foreground ^= 1;
+        variants[1].bold = true;
+        variants[2].italic = true;
+        variants[3].underline = true;
+        variants[4].strikeout = true;
         for changed in variants {
             let mut cache = TextCache::default();
             cache.begin_frame(12., 1.);
-            cache.layout(&original, || 1);
+            cache.layout("text", style(), || 1);
             cache.end_frame();
             cache.begin_frame(12., 1.);
-            assert_eq!(cache.layout(&changed, || 2), 2);
+            assert_eq!(cache.layout("text", changed, || 2), 2);
             cache.end_frame();
         }
+        let mut cache = TextCache::default();
+        cache.begin_frame(12., 1.);
+        cache.layout("text", style(), || 1);
+        cache.end_frame();
+        cache.begin_frame(12., 1.);
+        assert_eq!(cache.layout("other", style(), || 3), 3);
+        cache.end_frame();
     }
 
     #[test]
-    fn font_size_scale_and_removed_cells_release_old_layouts() {
+    fn font_size_scale_and_removed_runs_release_old_layouts() {
         use std::rc::Rc;
-        let cell = cell();
         let mut cache = TextCache::default();
         let layout = Rc::new(());
         for metrics in [(12., 1.), (14., 1.), (14., 2.)] {
             cache.begin_frame(metrics.0, metrics.1);
             assert_eq!(Rc::strong_count(&layout), 1);
-            cache.layout(&cell, || layout.clone());
+            cache.layout("text", style(), || layout.clone());
             cache.end_frame();
             assert_eq!(Rc::strong_count(&layout), 2);
         }
