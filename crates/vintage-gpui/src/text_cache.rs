@@ -3,12 +3,14 @@
 //! per cell. Backgrounds, selection and positions are painted separately and
 //! do not invalidate text.
 
+use vintage_terminal::UnderlineKind;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StyleKey {
     pub foreground: u32,
     pub bold: bool,
     pub italic: bool,
-    pub underline: bool,
+    pub underline: Option<UnderlineKind>,
     pub strikeout: bool,
 }
 
@@ -91,7 +93,7 @@ mod tests {
             foreground: 0xe6e1d8,
             bold: false,
             italic: false,
-            underline: false,
+            underline: None,
             strikeout: false,
         }
     }
@@ -136,7 +138,7 @@ mod tests {
         variants[0].foreground ^= 1;
         variants[1].bold = true;
         variants[2].italic = true;
-        variants[3].underline = true;
+        variants[3].underline = Some(UnderlineKind::Single);
         variants[4].strikeout = true;
         for changed in variants {
             let mut cache = TextCache::default();

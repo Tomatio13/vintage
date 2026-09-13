@@ -110,6 +110,10 @@ struct Shared {
     read_cancel: Mutex<Option<std::os::unix::net::UnixStream>>,
     exited: AtomicBool,
     error: Mutex<Option<String>>,
+    /// Newest OSC 52 clipboard copy, consumed by the UI. Never logged or persisted.
+    clipboard: Mutex<Option<String>>,
+    /// Bell requests coalesced since the UI last consumed them.
+    bell: AtomicBool,
 }
 impl Shared {
     fn request_stop(&self) {
@@ -248,6 +252,8 @@ impl Session {
             read_cancel: Mutex::new(Some(read_cancel)),
             exited: AtomicBool::new(false),
             error: Mutex::new(None),
+            clipboard: Mutex::new(None),
+            bell: AtomicBool::new(false),
         });
         // At most 32 * 64 KiB queued input. Output is parsed synchronously by the
         // reader; slowing the parser applies kernel PTY backpressure without loss.
@@ -360,11 +366,25 @@ impl Session {
                         break;
                     }
                 };
-                let responses = read_shared
-                    .terminal
-                    .lock()
-                    .expect("terminal mutex poisoned")
-                    .feed(&buffer[..count]);
+                let responses = {
+                    let mut terminal = read_shared
+                        .terminal
+                        .lock()
+                        .expect("terminal mutex poisoned");
+                    let responses = terminal.feed(&buffer[..count]);
+                    // Transient terminal events ride along with the next
+                    // coalesced refresh; clipboard text is never logged.
+                    if let Some(text) = terminal.take_clipboard() {
+                        *read_shared
+                            .clipboard
+                            .lock()
+                            .expect("clipboard mutex poisoned") = Some(text);
+                    }
+                    if terminal.take_bell() {
+                        read_shared.bell.store(true, Ordering::Release);
+                    }
+                    responses
+                };
                 read_shared.changed();
                 for bytes in responses {
                     if replies.send(Command::Input(bytes)).is_err() {
@@ -450,6 +470,20 @@ impl Session {
     }
     pub fn revision(&self) -> u64 {
         self.shared.revision.load(Ordering::Acquire)
+    }
+
+    /// Consume the newest pending OSC 52 clipboard copy, if any.
+    pub fn take_clipboard(&self) -> Option<String> {
+        self.shared
+            .clipboard
+            .lock()
+            .expect("clipboard mutex poisoned")
+            .take()
+    }
+
+    /// Consume pending bell requests as a single flag.
+    pub fn take_bell(&self) -> bool {
+        self.shared.bell.swap(false, Ordering::AcqRel)
     }
     pub fn exited(&self) -> bool {
         self.shared.exited.load(Ordering::Acquire)

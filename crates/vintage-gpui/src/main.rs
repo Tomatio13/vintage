@@ -9,12 +9,12 @@ mod window_frame;
 mod workspace;
 
 use gpui::{
-    actions, div, fill, font, point, prelude::*, px, relative, rgb, rgba, size, svg, App,
-    AssetSource, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, FontStyle, FontWeight, GlobalElementId, InspectorElementId,
-    KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder,
-    Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Style, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
+    actions, div, fill, font, outline, point, prelude::*, px, relative, rgb, rgba, size, svg, App,
+    AssetSource, BorderStyle, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler,
+    Entity, EntityInputHandler, FocusHandle, FontStyle, FontWeight, GlobalElementId,
+    InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PathBuilder, Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Style,
+    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
 };
 use std::{
     borrow::Cow,
@@ -34,7 +34,7 @@ use vintage_runtime::{
     native_sessions::{NativeSessions, Owner},
     Session,
 };
-use vintage_terminal::Snapshot;
+use vintage_terminal::{Snapshot, UnderlineKind};
 
 actions!(preview, [Quit]);
 
@@ -83,6 +83,10 @@ struct TerminalView {
     scroll_remainder: f32,
     reported_buttons: [bool; 3],
     last_mouse_cell: Option<(usize, usize)>,
+    /// Application-provided terminal title for the pane header.
+    pane_title: Option<String>,
+    /// A bell rang while the terminal was not focused.
+    needs_attention: bool,
     error: Option<String>,
 }
 
@@ -164,8 +168,15 @@ impl TerminalView {
             scroll_remainder: 0.,
             reported_buttons: [false; 3],
             last_mouse_cell: None,
+            pane_title: None,
+            needs_attention: false,
             error: None,
         }
+    }
+
+    /// Pane header text: the live terminal title, else the shell name.
+    pub fn header_title(&self) -> &str {
+        self.pane_title.as_deref().unwrap_or(&self.shell_label)
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) -> bool {
@@ -195,6 +206,7 @@ impl TerminalView {
                         self.reported_buttons = [false; 3];
                         self.last_mouse_cell = None;
                     }
+                    self.pane_title = snapshot.title.clone();
                     self.snapshot = Some(snapshot);
                     self.revision = revision;
                     self.error = session.error();
@@ -203,6 +215,15 @@ impl TerminalView {
                     retry = true;
                 }
             }
+            // Consume transient terminal events; clipboard text stays in
+            // flight and is never logged.
+            if let Some(text) = session.take_clipboard() {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+            if session.take_bell() && !self.focused {
+                self.needs_attention = true;
+                cx.notify();
+            }
         }
         drop(owner);
         self.report_focus(cx) || retry
@@ -210,7 +231,9 @@ impl TerminalView {
 
     fn update_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focused = window.is_window_active() && self.focus.is_focused(window);
-        if !self.focused {
+        if self.focused {
+            self.needs_attention = false;
+        } else {
             self.selecting = None;
             self.reported_buttons = [false; 3];
             self.last_mouse_cell = None;
@@ -492,11 +515,11 @@ impl TerminalView {
         }
     }
     fn cursor_bounds(&self) -> Option<Bounds<Pixels>> {
-        let (column, row) = self.snapshot.as_ref()?.cursor?;
+        let cursor = self.snapshot.as_ref()?.cursor?;
         Some(Bounds::new(
             point(
-                self.origin.x + self.cell_width * column as f32,
-                self.origin.y + self.line_height * row as f32,
+                self.origin.x + self.cell_width * cursor.column as f32,
+                self.origin.y + self.line_height * cursor.row as f32,
             ),
             size(self.cell_width, self.line_height),
         ))
@@ -598,8 +621,16 @@ struct TerminalElement {
     view: Entity<TerminalView>,
 }
 struct PaintState {
-    runs: Vec<(ShapedLine, Point<Pixels>)>,
+    runs: Vec<ShapedRun>,
     glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)>,
+}
+/// One shaped stretch of cells plus what paint needs to decorate it.
+struct ShapedRun {
+    line: ShapedLine,
+    at: Point<Pixels>,
+    width: Pixels,
+    underline: Option<UnderlineKind>,
+    foreground: u32,
 }
 /// One stretch of same-style cells shaped together; every cell contributes
 /// exactly one glyph so GPUI can snap advances to the cell grid.
@@ -686,7 +717,7 @@ impl Element for TerminalElement {
                 view.requested_size = dimensions;
             }
             view.text_cache.begin_frame(view.font_size, scale);
-            let mut runs: Vec<(ShapedLine, Point<Pixels>)> = Vec::new();
+            let mut runs: Vec<ShapedRun> = Vec::new();
             let mut glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)> = Vec::new();
             if let Some(snapshot) = &view.snapshot {
                 let cache = &mut view.text_cache;
@@ -708,7 +739,13 @@ impl Element for TerminalElement {
                                 run.force_width,
                             )
                         });
-                        runs.push((line, at));
+                        runs.push(ShapedRun {
+                            line,
+                            at,
+                            width: px(f32::from(cell_width) * run.cells as f32),
+                            underline: run.style.underline,
+                            foreground: run.style.foreground,
+                        });
                     }
                 };
                 let mut run: Option<Run> = None;
@@ -755,7 +792,7 @@ impl Element for TerminalElement {
                         }
                         continue;
                     }
-                    let blank = !cell.underline
+                    let blank = cell.underline.is_none()
                         && !cell.strikeout
                         && cell.text.chars().all(char::is_whitespace);
                     if blank {
@@ -765,7 +802,7 @@ impl Element for TerminalElement {
                             Some(active)
                                 if active.row == row
                                     && active.column + active.cells == column
-                                    && !active.style.underline
+                                    && active.style.underline.is_none()
                                     && !active.style.strikeout =>
                             {
                                 active.cells += 1;
@@ -838,7 +875,13 @@ impl Element for TerminalElement {
                         None,
                     );
                     view.preedit_layout = Some(line.clone());
-                    runs.push((line, cursor.origin));
+                    runs.push(ShapedRun {
+                        line,
+                        at: cursor.origin,
+                        width: px(0.),
+                        underline: None,
+                        foreground: 0xc6a66b,
+                    });
                 }
             }
             PaintState { runs, glyphs }
@@ -890,19 +933,33 @@ impl Element for TerminalElement {
             for (glyph, at, foreground) in &state.glyphs {
                 paint_glyph(window, glyph, *at, *foreground);
             }
-            if window.is_window_active()
-                && view.focus.is_focused(window)
-                && view.composition.text().is_empty()
-            {
+            // Underline decorations span whole runs, painted below the text.
+            let thickness = px((f32::from(view.line_height) / 12.).round().max(1.));
+            for run in &state.runs {
+                if let Some(kind) = run.underline {
+                    paint_underline(
+                        window,
+                        run.at,
+                        run.width,
+                        view.line_height,
+                        thickness,
+                        kind,
+                        run.foreground,
+                    );
+                }
+            }
+            if window.is_window_active() && view.composition.text().is_empty() {
+                let focused = view.focus.is_focused(window);
                 if let Some(cursor) = view.cursor_bounds() {
-                    window.paint_quad(fill(cursor, gpui::rgba(0xc6a66b66)));
+                    paint_cursor(window, view, cursor, focused);
                 }
             }
         }
         let line_height = view.line_height;
-        for (line, origin) in &state.runs {
-            if line
-                .paint(*origin, line_height, TextAlign::Left, None, window, cx)
+        for run in &state.runs {
+            if run
+                .line
+                .paint(run.at, line_height, TextAlign::Left, None, window, cx)
                 .is_err()
             {
                 // Report a generic failure only; never log terminal content.
@@ -935,11 +992,9 @@ fn shape_run(
         font,
         color: rgb(style.foreground).into(),
         background_color: None,
-        underline: style.underline.then_some(UnderlineStyle {
-            color: Some(rgb(style.foreground).into()),
-            thickness: px(1.),
-            wavy: false,
-        }),
+        // Underlines paint as whole-run rectangles in `paint_underline` so
+        // every style spans full cells like Alacritty's.
+        underline: None,
         strikethrough: style.strikeout.then_some(gpui::StrikethroughStyle {
             color: None,
             thickness: px(1.),
@@ -948,6 +1003,113 @@ fn shape_run(
     window
         .text_system()
         .shape_line(text.to_owned().into(), px(font_size), &[run], force_width)
+}
+
+/// Draw one underline decoration across a whole run.
+fn paint_underline(
+    window: &mut Window,
+    at: Point<Pixels>,
+    width: Pixels,
+    line_height: Pixels,
+    thickness: Pixels,
+    kind: UnderlineKind,
+    foreground: u32,
+) {
+    let base = at.y + line_height - thickness;
+    let mut rect = |x: f32, y: Pixels, w: f32| {
+        window.paint_quad(fill(
+            Bounds::new(point(at.x + px(x), y), size(px(w), thickness)),
+            rgb(foreground),
+        ));
+    };
+    match kind {
+        UnderlineKind::Single => rect(0., base, f32::from(width)),
+        UnderlineKind::Double => {
+            rect(0., base, f32::from(width));
+            rect(0., base - thickness - px(1.), f32::from(width));
+        }
+        UnderlineKind::Dotted | UnderlineKind::Dashed => {
+            // Even dots, or longer dashes with a wider gap.
+            let (dash, gap) = match kind {
+                UnderlineKind::Dashed => (3., 2.),
+                _ => (1., 1.),
+            };
+            let mut x = 0.;
+            while x < f32::from(width) {
+                rect(
+                    x,
+                    base,
+                    (dash * f32::from(thickness)).min(f32::from(width) - x),
+                );
+                x += (dash + gap) * f32::from(thickness);
+            }
+        }
+        UnderlineKind::Curly => {
+            // Zigzag stroke with one peak per period.
+            let amplitude = f32::from(thickness);
+            let period = amplitude * 6.;
+            let middle = base - thickness;
+            let mut builder = PathBuilder::stroke(thickness);
+            builder.move_to(point(at.x, middle));
+            let mut x = 0.;
+            let mut up = true;
+            while x + period / 2. <= f32::from(width) {
+                x += period / 2.;
+                builder.line_to(point(
+                    at.x + px(x),
+                    middle + px(if up { -amplitude } else { amplitude }),
+                ));
+                up = !up;
+            }
+            builder.line_to(point(at.x + width, middle));
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, rgb(foreground));
+            }
+        }
+    }
+}
+
+/// Draw the cursor in the style the application requested.
+fn paint_cursor(window: &mut Window, view: &TerminalView, cursor: Bounds<Pixels>, focused: bool) {
+    let style = view
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.cursor.as_ref())
+        .map(|cursor| cursor.style)
+        .unwrap_or(vintage_terminal::CursorStyle::Block);
+    if !focused {
+        // Hollow cursor marks an active but unfocused pane.
+        window.paint_quad(outline(cursor, rgb(0xc6a66b), BorderStyle::default()));
+        return;
+    }
+    match style {
+        vintage_terminal::CursorStyle::Beam => {
+            let width = px((f32::from(view.cell_width) / 4.).round().max(1.));
+            window.paint_quad(fill(
+                Bounds::new(cursor.origin, size(width, cursor.size.height)),
+                gpui::rgba(0xc6a66b99),
+            ));
+        }
+        vintage_terminal::CursorStyle::Underline => {
+            let height = px((f32::from(view.line_height) / 12.).round().max(1.));
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(
+                        cursor.origin.x,
+                        cursor.origin.y + cursor.size.height - height,
+                    ),
+                    size(cursor.size.width, height),
+                ),
+                gpui::rgba(0xc6a66b99),
+            ));
+        }
+        vintage_terminal::CursorStyle::HollowBlock => {
+            window.paint_quad(outline(cursor, rgb(0xc6a66b), BorderStyle::default()));
+        }
+        vintage_terminal::CursorStyle::Block => {
+            window.paint_quad(fill(cursor, gpui::rgba(0xc6a66b66)));
+        }
+    }
 }
 
 fn paint_stretch(

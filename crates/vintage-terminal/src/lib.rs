@@ -4,7 +4,11 @@ use alacritty_terminal::{
     grid::{Dimensions, Scroll},
     index::{Column, Line, Point, Side},
     selection::{Selection, SelectionType},
-    term::{cell::Flags, color::Colors, Config, Osc52, TermMode},
+    term::{
+        cell::Flags,
+        color::Colors,
+        {Config, Osc52, TermMode},
+    },
     vte::{
         ansi::Processor,
         ansi::{Color, CursorShape, Rgb},
@@ -30,17 +34,87 @@ impl Dimensions for Size {
     }
 }
 
+/// Events collected while parsing, split from the PTY replies that must be
+/// written back in order. Titles and clipboard contents stay in flight only:
+/// they are never logged or persisted.
 #[derive(Clone, Default)]
-struct Events(Arc<Mutex<Vec<Event>>>);
+struct Events(Arc<Mutex<Collected>>);
+
+#[derive(Default)]
+struct Collected {
+    replies: Vec<Event>,
+    /// `Some(Some(title))` sets the title, `Some(None)` resets it.
+    title: Option<Option<String>>,
+    clipboard: Option<String>,
+    bells: u32,
+}
+
 impl EventListener for Events {
     fn send_event(&self, event: Event) {
-        // Never retain application titles or clipboard contents from terminal output.
-        if matches!(
-            event,
-            Event::PtyWrite(_) | Event::ColorRequest(..) | Event::TextAreaSizeRequest(_)
-        ) {
-            self.0.lock().expect("event mutex poisoned").push(event);
+        match event {
+            // Never retain application titles or clipboard contents from terminal output.
+            Event::PtyWrite(_) | Event::ColorRequest(..) | Event::TextAreaSizeRequest(_) => {
+                self.0
+                    .lock()
+                    .expect("event mutex poisoned")
+                    .replies
+                    .push(event);
+            }
+            // Paste requests stay rejected by the Osc52::OnlyCopy policy.
+            Event::ClipboardStore(_, text) => {
+                self.0.lock().expect("event mutex poisoned").clipboard = Some(text);
+            }
+            Event::Bell => {
+                self.0.lock().expect("event mutex poisoned").bells += 1;
+            }
+            Event::Title(title) => {
+                self.0.lock().expect("event mutex poisoned").title =
+                    Some(Some(truncate_title(title)));
+            }
+            Event::ResetTitle => {
+                self.0.lock().expect("event mutex poisoned").title = Some(None);
+            }
+            _ => {}
         }
+    }
+}
+
+fn truncate_title(title: String) -> String {
+    title.chars().take(200).collect()
+}
+
+/// Cursor style requested by the application via DECSCUSR.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorStyle {
+    Block,
+    Underline,
+    Beam,
+    HollowBlock,
+}
+
+/// Underline decoration requested via SGR 4/21.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnderlineKind {
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
+}
+
+fn underline_kind(flags: &Flags) -> Option<UnderlineKind> {
+    if flags.contains(Flags::UNDERLINE) {
+        Some(UnderlineKind::Single)
+    } else if flags.contains(Flags::DOUBLE_UNDERLINE) {
+        Some(UnderlineKind::Double)
+    } else if flags.contains(Flags::UNDERCURL) {
+        Some(UnderlineKind::Curly)
+    } else if flags.contains(Flags::DOTTED_UNDERLINE) {
+        Some(UnderlineKind::Dotted)
+    } else if flags.contains(Flags::DASHED_UNDERLINE) {
+        Some(UnderlineKind::Dashed)
+    } else {
+        None
     }
 }
 
@@ -54,21 +128,30 @@ pub struct Cell {
     pub background: u32,
     pub bold: bool,
     pub italic: bool,
-    pub underline: bool,
+    pub underline: Option<UnderlineKind>,
     pub strikeout: bool,
     pub selected: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+    pub column: usize,
+    pub row: usize,
+    pub style: CursorStyle,
 }
 
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub size: TerminalSize,
     pub cells: Vec<Cell>,
-    pub cursor: Option<(usize, usize)>,
+    pub cursor: Option<Cursor>,
     pub application_cursor: bool,
     pub bracketed_paste: bool,
     pub focus_reporting: bool,
     pub mouse: MouseMode,
     pub display_offset: usize,
+    /// Application-provided title (OSC 0/2), already length-capped.
+    pub title: Option<String>,
 }
 
 pub struct Terminal {
@@ -76,6 +159,9 @@ pub struct Terminal {
     parser: Processor,
     events: Events,
     size: TerminalSize,
+    title: Option<String>,
+    clipboard: Option<String>,
+    bells: u32,
 }
 
 impl Terminal {
@@ -83,7 +169,9 @@ impl Terminal {
         let events = Events::default();
         let config = Config {
             scrolling_history: 1000,
-            osc52: Osc52::Disabled,
+            // Copy requests only: paste requests would let remote output read
+            // the system clipboard.
+            osc52: Osc52::OnlyCopy,
             ..Config::default()
         };
         Self {
@@ -91,13 +179,16 @@ impl Terminal {
             parser: Processor::new(),
             events,
             size,
+            title: None,
+            clipboard: None,
+            bells: 0,
         }
     }
 
     pub fn set_scrollback(&mut self, lines: usize) {
         self.term.set_options(Config {
             scrolling_history: lines.min(10000),
-            osc52: Osc52::Disabled,
+            osc52: Osc52::OnlyCopy,
             ..Config::default()
         });
     }
@@ -106,8 +197,19 @@ impl Terminal {
     /// Returned replies must be written back to the same PTY, in order.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
         self.parser.advance(&mut self.term, bytes);
-        let events = std::mem::take(&mut *self.events.0.lock().expect("event mutex poisoned"));
-        events
+        let mut collected =
+            std::mem::take(&mut *self.events.0.lock().expect("event mutex poisoned"));
+        if let Some(title) = collected.title.take() {
+            self.title = title;
+        }
+        if collected.bells > 0 {
+            self.bells = self.bells.saturating_add(collected.bells);
+        }
+        if let Some(text) = collected.clipboard.take() {
+            self.clipboard = Some(text);
+        }
+        collected
+            .replies
             .into_iter()
             .filter_map(|event| match event {
                 Event::PtyWrite(text) => Some(text.into_bytes()),
@@ -134,6 +236,21 @@ impl Terminal {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Application-provided title (OSC 0/2), if any.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Consume the newest pending OSC 52 clipboard copy, if any.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
+    }
+
+    /// Consume pending bell requests as a single flag.
+    pub fn take_bell(&mut self) -> bool {
+        std::mem::take(&mut self.bells) > 0
     }
 
     pub fn resize(&mut self, size: TerminalSize) {
@@ -233,7 +350,7 @@ impl Terminal {
                 background,
                 bold: cell.flags.contains(Flags::BOLD),
                 italic: cell.flags.contains(Flags::ITALIC),
-                underline: cell.flags.intersects(Flags::ALL_UNDERLINES),
+                underline: underline_kind(&cell.flags),
                 strikeout: cell.flags.contains(Flags::STRIKEOUT),
                 selected: content
                     .selection
@@ -244,7 +361,16 @@ impl Terminal {
         let cursor = (content.cursor.shape != CursorShape::Hidden
             && cursor_row >= 0
             && cursor_row < self.size.rows as i32)
-            .then_some((content.cursor.point.column.0, cursor_row as usize));
+            .then_some(Cursor {
+                column: content.cursor.point.column.0,
+                row: cursor_row as usize,
+                style: match content.cursor.shape {
+                    CursorShape::Underline => CursorStyle::Underline,
+                    CursorShape::Beam => CursorStyle::Beam,
+                    CursorShape::HollowBlock => CursorStyle::HollowBlock,
+                    _ => CursorStyle::Block,
+                },
+            });
         Snapshot {
             size: self.size,
             cells,
@@ -271,6 +397,7 @@ impl Terminal {
                 },
             },
             display_offset: content.display_offset,
+            title: self.title.clone(),
         }
     }
 }
@@ -416,5 +543,71 @@ mod tests {
         t.feed(b"32mabcdefg");
         assert_eq!(t.bottom_text(), "def\ng");
         assert_eq!(t.snapshot().cells[0].foreground, 0x5ee6a8);
+    }
+    #[test]
+    fn osc52_copy_reaches_the_clipboard_and_paste_stays_rejected() {
+        let mut t = terminal();
+        t.feed(b"\x1b]52;c;aGVsbG8=\x07");
+        assert_eq!(t.take_clipboard().as_deref(), Some("hello"));
+        assert_eq!(t.take_clipboard(), None);
+    }
+    #[test]
+    fn cursor_style_follows_decscusr() {
+        let mut t = terminal();
+        t.feed(b"\x1b[6 q");
+        assert_eq!(
+            t.snapshot().cursor.map(|cursor| cursor.style),
+            Some(CursorStyle::Beam)
+        );
+        t.feed(b"\x1b[4 q");
+        assert_eq!(
+            t.snapshot().cursor.map(|cursor| cursor.style),
+            Some(CursorStyle::Underline)
+        );
+        t.feed(b"\x1b[2 q");
+        assert_eq!(
+            t.snapshot().cursor.map(|cursor| cursor.style),
+            Some(CursorStyle::Block)
+        );
+    }
+    #[test]
+    fn bells_coalesce_until_consumed() {
+        let mut t = terminal();
+        t.feed(b"\x07\x07");
+        assert!(t.take_bell());
+        assert!(!t.take_bell());
+    }
+    #[test]
+    fn titles_set_reset_and_cap_length() {
+        let mut t = terminal();
+        t.feed(b"\x1b[22;0t"); // Push the default (no title).
+        t.feed(b"\x1b]2;vintage\x07");
+        assert_eq!(t.title(), Some("vintage"));
+        assert_eq!(t.snapshot().title.as_deref(), Some("vintage"));
+        t.feed(b"\x1b[23;0t"); // Pop restores the default.
+        assert_eq!(t.title(), None);
+        assert_eq!(t.snapshot().title, None);
+        let long = "x".repeat(500);
+        t.feed(format!("\x1b]2;{long}\x07").as_bytes());
+        assert_eq!(t.title().map(str::len), Some(200));
+    }
+    #[test]
+    fn underline_styles_map_to_kinds_and_reset() {
+        let mut t = terminal();
+        t.feed(b"a\x1b[4mb\x1b[4:2mc\x1b[4:3md\x1b[4:4me\x1b[4:5mf\x1b[24mg");
+        let cells = t.snapshot().cells;
+        let underline_at = |column: usize| {
+            cells
+                .iter()
+                .find(|cell| cell.column == column && cell.row == 0)
+                .and_then(|cell| cell.underline)
+        };
+        assert_eq!(underline_at(0), None);
+        assert_eq!(underline_at(1), Some(UnderlineKind::Single));
+        assert_eq!(underline_at(2), Some(UnderlineKind::Double));
+        assert_eq!(underline_at(3), Some(UnderlineKind::Curly));
+        assert_eq!(underline_at(4), Some(UnderlineKind::Dotted));
+        assert_eq!(underline_at(5), Some(UnderlineKind::Dashed));
+        assert_eq!(underline_at(6), None);
     }
 }
