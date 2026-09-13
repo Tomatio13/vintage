@@ -17,7 +17,7 @@ pub const FONT_PRESETS: [&str; 6] = [
     "JetBrainsMono Nerd Font",
     "Custom",
 ];
-pub const ACTIONS: [&str; 9] = [
+pub const ACTIONS: [&str; 10] = [
     "Previous tab",
     "Next tab",
     "Previous pane",
@@ -27,6 +27,7 @@ pub const ACTIONS: [&str; 9] = [
     "New terminal",
     "Split right",
     "Split down",
+    "Search in terminal",
 ];
 
 fn default_hook_notifications() -> bool {
@@ -82,10 +83,10 @@ impl Binding {
         Ok(())
     }
 }
-pub fn default_bindings() -> [Binding; 9] {
+pub fn default_bindings() -> [Binding; 10] {
     std::array::from_fn(|i| Binding {
         key: [
-            "left", "right", "up", "down", "left", "right", "n", "d", "t",
+            "left", "right", "up", "down", "left", "right", "n", "d", "t", "s",
         ][i]
             .into(),
         ctrl: i != 4 && i != 5,
@@ -104,7 +105,7 @@ pub struct Settings {
     pub font_size: u16,
     pub scrollback: usize,
     pub shell: String,
-    pub bindings: [Binding; 9],
+    pub bindings: [Binding; 10],
     #[serde(default = "default_hook_notifications")]
     pub hook_notifications: bool,
 }
@@ -246,13 +247,17 @@ impl SettingsStore {
             .get_mut("bindings")
             .and_then(serde_json::Value::as_array_mut)
         {
+            let defaults = default_bindings();
             if bindings.len() == 6 {
-                let defaults = default_bindings();
                 bindings.extend(
                     defaults[6..]
                         .iter()
                         .map(|binding| serde_json::json!(binding)),
                 );
+            }
+            if bindings.len() == 9 {
+                // Settings saved before the search shortcut existed.
+                bindings.push(serde_json::json!(defaults[9]));
             }
         }
         let settings: Settings = serde_json::from_value(value)
@@ -373,6 +378,21 @@ mod tests {
         assert_eq!(settings.bindings[6].label(), "Ctrl+Shift+n");
         assert_eq!(settings.bindings[7].label(), "Ctrl+Shift+d");
         assert_eq!(settings.bindings[8].label(), "Ctrl+Shift+t");
+        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+s");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn nine_binding_settings_migrate_with_default_search_action() {
+        let root =
+            std::env::temp_dir().join(format!("vintage-settings-search-{}", std::process::id()));
+        let store = SettingsStore::new(root.join("settings.json"));
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["bindings"].as_array_mut().unwrap().truncate(9);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&store.path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let settings = store.load().unwrap();
+        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+s");
+        settings.validate().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -35,6 +35,7 @@ use vintage_runtime::{
     Session,
 };
 use vintage_terminal::{Snapshot, UnderlineKind};
+use workspace::button;
 
 actions!(preview, [Quit]);
 
@@ -54,6 +55,12 @@ impl AssetSource for Assets {
     fn list(&self, _path: &str) -> anyhow::Result<Vec<gpui::SharedString>> {
         Ok(Vec::new())
     }
+}
+
+/// State of the scrollback search bar; `Some` while it is open.
+struct SearchBar {
+    composition: Composition,
+    focus: FocusHandle,
 }
 
 struct TerminalView {
@@ -87,6 +94,7 @@ struct TerminalView {
     pane_title: Option<String>,
     /// A bell rang while the terminal was not focused.
     needs_attention: bool,
+    search: Option<SearchBar>,
     error: Option<String>,
 }
 
@@ -170,6 +178,7 @@ impl TerminalView {
             last_mouse_cell: None,
             pane_title: None,
             needs_attention: false,
+            search: None,
             error: None,
         }
     }
@@ -177,6 +186,59 @@ impl TerminalView {
     /// Pane header text: the live terminal title, else the shell name.
     pub fn header_title(&self) -> &str {
         self.pane_title.as_deref().unwrap_or(&self.shell_label)
+    }
+
+    /// Toggle the scrollback search bar for this terminal.
+    pub fn toggle_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.take().is_some() {
+            let _ = self.operate(|s| s.set_search(""), cx);
+            self.focus.focus(window, cx);
+        } else {
+            let focus = cx.focus_handle();
+            focus.focus(window, cx);
+            self.search = Some(SearchBar {
+                composition: Composition::default(),
+                focus,
+            });
+        }
+        cx.notify();
+    }
+
+    fn search_focused(&self, window: &Window) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|search| search.focus.is_focused(window))
+    }
+
+    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search = None;
+        let _ = self.operate(|s| s.set_search(""), cx);
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn update_search_pattern(&mut self, cx: &mut Context<Self>) {
+        let pattern = self
+            .search
+            .as_ref()
+            .map(|search| search.composition.text().to_owned());
+        if let Some(pattern) = pattern {
+            let _ = self.operate(|s| s.set_search(&pattern), cx);
+        }
+        cx.notify();
+    }
+
+    fn paste_into_search(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if let Some(search) = self.search.as_mut() {
+            if search.composition.text().chars().count() + text.chars().count() <= 256 {
+                let selection = search.composition.selection();
+                let _ = search.composition.replace(Some(selection), &text, None);
+            }
+        }
+        self.update_search_pattern(cx);
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) -> bool {
@@ -321,7 +383,27 @@ impl TerminalView {
             }
         }
     }
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focused(window) {
+            let modifiers = event.keystroke.modifiers;
+            match event.keystroke.key.as_str() {
+                "escape" => self.close_search(window, cx),
+                "enter" | "return" => {
+                    if modifiers.shift {
+                        let _ = self.operate(|s| s.search_previous(), cx);
+                    } else {
+                        let _ = self.operate(|s| s.search_next(), cx);
+                    }
+                }
+                "c" if modifiers.control && modifiers.shift => self.copy(cx),
+                "v" if modifiers.control && modifiers.shift => self.paste_into_search(cx),
+                // Text lands here through the IME input handler instead; other
+                // keys bubble so workspace shortcuts keep working.
+                _ => return,
+            }
+            cx.stop_propagation();
+            return;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if modifiers.control && modifiers.shift && key.eq_ignore_ascii_case("c") {
@@ -531,9 +613,17 @@ impl EntityInputHandler for TerminalView {
         &mut self,
         range: Range<usize>,
         actual: &mut Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
+        if self.search_focused(window) {
+            let text = self
+                .search
+                .as_ref()
+                .and_then(|search| search.composition.text_for_range(range.clone()))?;
+            *actual = Some(range);
+            return Some(text);
+        }
         let text = self.composition.text_for_range(range.clone())?;
         *actual = Some(range);
         Some(text)
@@ -541,28 +631,58 @@ impl EntityInputHandler for TerminalView {
     fn selected_text_range(
         &mut self,
         _: bool,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        if self.search_focused(window) {
+            return self.search.as_ref().map(|search| UTF16Selection {
+                range: search.composition.selection(),
+                reversed: false,
+            });
+        }
         Some(UTF16Selection {
             range: self.composition.selection(),
             reversed: false,
         })
     }
-    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+    fn marked_text_range(
+        &self,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Range<usize>> {
+        if self.search_focused(window) {
+            return self
+                .search
+                .as_ref()
+                .and_then(|search| search.composition.marked_range());
+        }
         self.composition.marked_range()
     }
-    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.composition.clear();
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                search.composition.clear();
+            }
+        } else {
+            self.composition.clear();
+        }
         cx.notify();
     }
     fn replace_text_in_range(
         &mut self,
         range: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                let range = range.or_else(|| Some(search.composition.selection()));
+                let _ = search.composition.replace(range, text, None);
+            }
+            self.update_search_pattern(cx);
+            return;
+        }
         match self.composition.replace(range, text, None) {
             Ok(()) => {
                 if self.send(self.composition.text().as_bytes().to_vec(), cx) {
@@ -578,9 +698,16 @@ impl EntityInputHandler for TerminalView {
         range: Option<Range<usize>>,
         text: &str,
         selected: Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                let _ = search.composition.replace(range, text, selected);
+            }
+            self.update_search_pattern(cx);
+            return;
+        }
         if let Err(error) = self.composition.replace(range, text, selected) {
             self.error = Some(error.into());
         }
@@ -589,10 +716,13 @@ impl EntityInputHandler for TerminalView {
     fn bounds_for_range(
         &mut self,
         range: Range<usize>,
-        _: Bounds<Pixels>,
-        _: &mut Window,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        if self.search_focused(window) {
+            return Some(bounds);
+        }
         let cursor = self.cursor_bounds()?;
         let Some(layout) = &self.preedit_layout else {
             return Some(cursor);
@@ -607,9 +737,12 @@ impl EntityInputHandler for TerminalView {
     fn character_index_for_point(
         &mut self,
         point: Point<Pixels>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
+        if self.search_focused(window) {
+            return None;
+        }
         let cursor = self.cursor_bounds()?;
         let layout = self.preedit_layout.as_ref()?;
         let index = layout.index_for_x(point.x - cursor.left())?;
@@ -928,6 +1061,26 @@ impl Element for TerminalElement {
                 stretch = paints.then(|| (cell.row, cell.column, cell.width.max(1), color));
             }
             paint_stretch(window, view, &stretch);
+            // Search highlights sit on top of backgrounds and under text.
+            if let Some(search) = &snapshot.search {
+                for rect in &search.rects {
+                    let (start, end) = (rect.start, rect.end);
+                    let area = Bounds::new(
+                        point(
+                            view.origin.x + view.cell_width * start.0 as f32,
+                            view.origin.y + view.line_height * start.1 as f32,
+                        ),
+                        size(
+                            view.cell_width * (end.0 - start.0 + 1) as f32,
+                            view.line_height,
+                        ),
+                    );
+                    window.paint_quad(fill(
+                        area,
+                        rgba(if rect.active { 0xe8aa8299 } else { 0xc6a66b40 }),
+                    ));
+                }
+            }
             // Box drawing and block glyphs drawn as vectors over the
             // backgrounds and under the text.
             for (glyph, at, foreground) in &state.glyphs {
@@ -1179,9 +1332,80 @@ impl Render for TerminalView {
         let status = self.error.clone().or_else(|| owner.error.clone()).unwrap_or_else(|| {
             if owner.startup.is_some() { "Starting shell…".into() }
             else if owner.session.as_ref().is_some_and(Session::exited) { "Shell exited — output remains available".into() }
-            else { format!("{} × {}  ·  {} px  ·  Ctrl+Shift+C/V copy/paste  ·  Shift+wheel select scrollback", self.requested_size.columns, self.requested_size.rows, self.font_size) }
+            else {
+                let search_hint = cx
+                    .global::<theme::Preferences>()
+                    .0
+                    .bindings[9]
+                    .label();
+                format!("{} × {}  ·  {} px  ·  Ctrl+Shift+C/V copy/paste  ·  Shift+wheel select scrollback  ·  {search_hint} search", self.requested_size.columns, self.requested_size.rows, self.font_size)
+            }
         });
         drop(owner);
+        let search_bar = self.search.as_ref().map(|search| {
+            let entity = cx.entity();
+            let focus = search.focus.clone();
+            let text = search.composition.text().to_owned();
+            let status = self
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.search.as_ref())
+                .map(|search| {
+                    if search.invalid {
+                        "Invalid pattern".to_owned()
+                    } else if search.total == 0 {
+                        "No matches".to_owned()
+                    } else {
+                        format!("{}/{}", (search.active + 1).min(search.total), search.total)
+                    }
+                });
+            div()
+                .h(gpui::rems(1.75))
+                .flex_none()
+                .px_2()
+                .flex()
+                .items_center()
+                .gap_3()
+                .bg(palette.color(0x201f1c))
+                .border_b_1()
+                .border_color(palette.color(0x39352e))
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_size(gpui::rems(0.75))
+                        .text_color(palette.color(0xe6e1d8))
+                        .child(text)
+                        .child(
+                            gpui::canvas(
+                                |_, _, _| (),
+                                move |bounds, _, window, cx| {
+                                    window.handle_input(
+                                        &focus,
+                                        ElementInputHandler::new(bounds, entity),
+                                        cx,
+                                    );
+                                },
+                            )
+                            .absolute()
+                            .size_full(),
+                        ),
+                )
+                .children(status.map(|status| {
+                    div()
+                        .flex_none()
+                        .text_size(gpui::rems(0.6875))
+                        .text_color(palette.color(0xbab1a1))
+                        .child(status)
+                }))
+                .child(
+                    button("close-search", "×").on_click(cx.listener(|view, _, window, cx| {
+                        view.close_search(window, cx);
+                    })),
+                )
+        });
         div()
             .size_full()
             .flex()
@@ -1190,6 +1414,7 @@ impl Render for TerminalView {
             .text_color(palette.color(0xe6e1d8))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .children(search_bar)
             .child(
                 div()
                     .id("terminal-surface")

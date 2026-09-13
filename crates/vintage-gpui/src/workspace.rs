@@ -501,6 +501,13 @@ impl WorkspaceView {
                     6 => self.add_tab(window, cx),
                     7 => self.split(Axis::Horizontal, window, cx),
                     8 => self.split(Axis::Vertical, window, cx),
+                    9 => {
+                        if let Some(pane) = self.model.tab().map(|tab| tab.active_pane) {
+                            if let Some(terminal) = self.terminals.get(&pane) {
+                                terminal.update(cx, |view, cx| view.toggle_search(window, cx));
+                            }
+                        }
+                    }
                     _ => unreachable!("settings validation limits shortcut actions"),
                 }
                 cx.stop_propagation();

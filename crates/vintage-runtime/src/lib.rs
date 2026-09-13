@@ -99,6 +99,9 @@ enum Command {
     Scrollback(usize),
     Select((usize, usize), (usize, usize)),
     ClearSelection,
+    SetSearch(String),
+    SearchNext,
+    SearchPrevious,
 }
 
 struct Shared {
@@ -323,6 +326,21 @@ impl Session {
                             .lock()
                             .expect("terminal mutex poisoned")
                             .clear_selection(),
+                        Command::SetSearch(pattern) => write_shared
+                            .terminal
+                            .lock()
+                            .expect("terminal mutex poisoned")
+                            .set_search(&pattern),
+                        Command::SearchNext => write_shared
+                            .terminal
+                            .lock()
+                            .expect("terminal mutex poisoned")
+                            .search_next(),
+                        Command::SearchPrevious => write_shared
+                            .terminal
+                            .lock()
+                            .expect("terminal mutex poisoned")
+                            .search_previous(),
                     }
                     Ok(())
                 })();
@@ -545,6 +563,15 @@ impl Session {
     }
     pub fn clear_selection(&self) -> Result<()> {
         self.enqueue(Command::ClearSelection)
+    }
+    pub fn set_search(&self, pattern: &str) -> Result<()> {
+        self.enqueue(Command::SetSearch(pattern.to_owned()))
+    }
+    pub fn search_next(&self) -> Result<()> {
+        self.enqueue(Command::SearchNext)
+    }
+    pub fn search_previous(&self) -> Result<()> {
+        self.enqueue(Command::SearchPrevious)
     }
 
     /// Explicit synchronous shutdown for a background owner or tests.

@@ -2,11 +2,12 @@
 use alacritty_terminal::{
     event::{Event, EventListener, WindowSize},
     grid::{Dimensions, Scroll},
-    index::{Column, Line, Point, Side},
+    index::{Column, Direction, Line, Point, Side},
     selection::{Selection, SelectionType},
     term::{
         cell::Flags,
         color::Colors,
+        search::{Match, RegexSearch},
         {Config, Osc52, TermMode},
     },
     vte::{
@@ -152,6 +153,26 @@ pub struct Snapshot {
     pub display_offset: usize,
     /// Application-provided title (OSC 0/2), already length-capped.
     pub title: Option<String>,
+    /// Live scrollback search state, when a pattern is set.
+    pub search: Option<SearchSnapshot>,
+}
+
+/// One highlighted search match row, in viewport cell coordinates
+/// (inclusive on both ends).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchRect {
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchSnapshot {
+    pub pattern: String,
+    pub invalid: bool,
+    pub total: usize,
+    pub active: usize,
+    pub rects: Vec<SearchRect>,
 }
 
 pub struct Terminal {
@@ -162,6 +183,11 @@ pub struct Terminal {
     title: Option<String>,
     clipboard: Option<String>,
     bells: u32,
+    search_pattern: Option<String>,
+    search_regex: Option<RegexSearch>,
+    search_matches: Vec<Match>,
+    search_active: usize,
+    search_invalid: bool,
 }
 
 impl Terminal {
@@ -182,6 +208,11 @@ impl Terminal {
             title: None,
             clipboard: None,
             bells: 0,
+            search_pattern: None,
+            search_regex: None,
+            search_matches: Vec::new(),
+            search_active: 0,
+            search_invalid: false,
         }
     }
 
@@ -191,6 +222,135 @@ impl Terminal {
             osc52: Osc52::OnlyCopy,
             ..Config::default()
         });
+        self.refresh_search();
+    }
+
+    /// Set the scrollback search pattern; an empty pattern clears it.
+    /// Patterns are regular expressions. Invalid patterns are reported
+    /// through [`SearchSnapshot::invalid`] instead of failing.
+    pub fn set_search(&mut self, pattern: &str) {
+        if pattern.is_empty() {
+            self.clear_search();
+            return;
+        }
+        if pattern.len() > 256 {
+            self.search_pattern = Some(pattern.chars().take(256).collect());
+            self.search_invalid = true;
+            self.search_matches.clear();
+            self.search_regex = None;
+            return;
+        }
+        self.search_pattern = Some(pattern.to_owned());
+        match RegexSearch::new(pattern) {
+            Ok(regex) => {
+                self.search_regex = Some(regex);
+                self.search_invalid = false;
+                self.refresh_search();
+                // Start from the match closest to the current viewport.
+                self.search_active = self
+                    .search_matches
+                    .iter()
+                    .position(|hit| self.hit_visible(hit))
+                    .unwrap_or(0);
+            }
+            Err(_) => {
+                self.search_regex = None;
+                self.search_matches.clear();
+                self.search_invalid = true;
+            }
+        }
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_pattern = None;
+        self.search_regex = None;
+        self.search_matches.clear();
+        self.search_active = 0;
+        self.search_invalid = false;
+    }
+
+    /// Jump to the next match, wrapping around, scrolling it into view.
+    pub fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_active = (self.search_active + 1) % self.search_matches.len();
+        self.scroll_active_hit_into_view();
+    }
+
+    /// Jump to the previous match, wrapping around, scrolling it into view.
+    pub fn search_previous(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_active =
+            (self.search_active + self.search_matches.len() - 1) % self.search_matches.len();
+        self.scroll_active_hit_into_view();
+    }
+
+    /// Recompute all matches for the live pattern over history and screen.
+    fn refresh_search(&mut self) {
+        let Some(regex) = self.search_regex.as_mut() else {
+            return;
+        };
+        self.search_matches.clear();
+        if self.term.total_lines() == 0 {
+            return;
+        }
+        let mut origin = Point::new(self.term.topmost_line(), Column(0));
+        while self.search_matches.len() < 100_000 {
+            let Some(found) =
+                self.term
+                    .search_next(regex, origin, Direction::Right, Side::Left, None)
+            else {
+                break;
+            };
+            // search_next wraps around the buffer; stop before duplicates.
+            if !self.search_matches.is_empty() && *found.start() <= *self.search_matches[0].start()
+            {
+                break;
+            }
+            origin = Point::new(found.end().line, found.end().column);
+            self.search_matches.push(found);
+        }
+        self.search_active = self
+            .search_matches
+            .iter()
+            .position(|hit| self.hit_visible(hit))
+            .unwrap_or(0);
+    }
+
+    /// Viewport row range of a hit: `(top, bottom)` in screen rows.
+    fn hit_rows(&self, hit: &Match) -> (i32, i32) {
+        let offset = self.term.grid().display_offset() as i32;
+        let to_row = |line: i32| line + offset;
+        (to_row(*hit.start().line), to_row(*hit.end().line))
+    }
+
+    fn hit_visible(&self, hit: &Match) -> bool {
+        let (top, bottom) = self.hit_rows(hit);
+        bottom >= 0 && top < self.size.rows as i32
+    }
+
+    fn scroll_active_hit_into_view(&mut self) {
+        let Some(hit) = self.search_matches.get(self.search_active) else {
+            return;
+        };
+        let hit = hit.clone();
+        let (top, bottom) = self.hit_rows(&hit);
+        let screen = self.size.rows as i32;
+        let delta = if bottom < 0 {
+            // Above the viewport: scroll up towards history.
+            -bottom.min(screen)
+        } else if top >= screen {
+            // Below the viewport: scroll back down.
+            screen - top - 1
+        } else {
+            return;
+        };
+        if delta != 0 {
+            self.term.scroll_display(Scroll::Delta(delta));
+        }
     }
 
     /// Feed ordered raw bytes, including incomplete UTF-8 or escape sequences.
@@ -207,6 +367,10 @@ impl Terminal {
         }
         if let Some(text) = collected.clipboard.take() {
             self.clipboard = Some(text);
+        }
+        // New output can invalidate match positions.
+        if self.search_pattern.is_some() {
+            self.refresh_search();
         }
         collected
             .replies
@@ -256,6 +420,10 @@ impl Terminal {
     pub fn resize(&mut self, size: TerminalSize) {
         self.term.resize(Size(size));
         self.size = size;
+        // Reflow moves match positions.
+        if self.search_pattern.is_some() {
+            self.refresh_search();
+        }
     }
 
     pub fn scroll(&mut self, lines: i32) {
@@ -398,7 +566,50 @@ impl Terminal {
             },
             display_offset: content.display_offset,
             title: self.title.clone(),
+            search: self.search_snapshot(content.display_offset),
         }
+    }
+
+    /// Map live matches onto the currently visible rows.
+    fn search_snapshot(&self, display_offset: usize) -> Option<SearchSnapshot> {
+        let pattern = self.search_pattern.as_ref()?;
+        let offset = display_offset as i32;
+        let screen = self.size.rows as i32;
+        let to_row = |line: i32| line + offset;
+        let mut rects = Vec::new();
+        for (index, hit) in self.search_matches.iter().enumerate() {
+            let active = index == self.search_active;
+            let start_line = to_row(*hit.start().line);
+            let end_line = to_row(*hit.end().line);
+            for line in start_line..=end_line {
+                if line < 0 || line >= screen {
+                    continue;
+                }
+                let row = line as usize;
+                let start_col = if line == start_line {
+                    hit.start().column.0
+                } else {
+                    0
+                };
+                let end_col = if line == end_line {
+                    hit.end().column.0
+                } else {
+                    self.size.columns as usize - 1
+                };
+                rects.push(SearchRect {
+                    start: (start_col, row),
+                    end: (end_col, row),
+                    active,
+                });
+            }
+        }
+        Some(SearchSnapshot {
+            pattern: pattern.clone(),
+            invalid: self.search_invalid,
+            total: self.search_matches.len(),
+            active: self.search_active,
+            rects,
+        })
     }
 }
 
@@ -609,5 +820,80 @@ mod tests {
         assert_eq!(underline_at(4), Some(UnderlineKind::Dotted));
         assert_eq!(underline_at(5), Some(UnderlineKind::Dashed));
         assert_eq!(underline_at(6), None);
+    }
+    #[test]
+    fn search_finds_scrollback_matches_and_navigates() {
+        let mut t = Terminal::new(TerminalSize::new(20, 3).unwrap());
+        for i in 0..10 {
+            t.feed(format!("needle-{i} filler\n").as_bytes());
+        }
+        t.set_search("needle");
+        let search = t.snapshot().search.unwrap();
+        assert_eq!(search.total, 10);
+        // The search starts on the first match visible in the viewport.
+        let start = search.active;
+        // Navigate twice, wrapping around the buffer end.
+        t.search_next();
+        t.search_next();
+        let search = t.snapshot().search.unwrap();
+        assert_eq!(search.active, (start + 2) % 10);
+        assert!(t.snapshot().display_offset > 0);
+        assert!(search.rects.iter().any(|rect| rect.active));
+        assert!(search.rects.iter().any(|rect| t
+            .snapshot()
+            .cells
+            .iter()
+            .any(|cell| cell.row == rect.end.1)));
+        // Eight more steps land back on the starting match.
+        for _ in 0..8 {
+            t.search_next();
+        }
+        assert_eq!(t.snapshot().search.unwrap().active, start);
+        t.search_previous();
+        assert_eq!(t.snapshot().search.unwrap().active, (start + 9) % 10);
+    }
+    #[test]
+    fn search_highlights_whole_words_on_screen() {
+        let mut t = Terminal::new(TerminalSize::new(20, 3).unwrap());
+        t.feed(b"a bc de bc\n");
+        t.set_search("bc");
+        let search = t.snapshot().search.unwrap();
+        assert_eq!(search.total, 2);
+        assert_eq!(
+            search.rects,
+            vec![
+                SearchRect {
+                    start: (2, 0),
+                    end: (3, 0),
+                    active: true,
+                },
+                SearchRect {
+                    start: (8, 0),
+                    end: (9, 0),
+                    active: false,
+                },
+            ]
+        );
+    }
+    #[test]
+    fn search_clears_and_reports_invalid_patterns() {
+        let mut t = terminal();
+        t.feed(b"hello\n");
+        t.set_search("hel");
+        assert!(t.snapshot().search.is_some());
+        t.set_search("");
+        assert_eq!(t.snapshot().search, None);
+        t.set_search("([");
+        let search = t.snapshot().search.unwrap();
+        assert!(search.invalid);
+        assert_eq!(search.total, 0);
+    }
+    #[test]
+    fn search_refreshes_as_output_flows() {
+        let mut t = terminal();
+        t.set_search("needle");
+        assert_eq!(t.snapshot().search.unwrap().total, 0);
+        t.feed(b"one needle\n");
+        assert_eq!(t.snapshot().search.unwrap().total, 1);
     }
 }
