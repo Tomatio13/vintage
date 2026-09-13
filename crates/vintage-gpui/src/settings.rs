@@ -777,8 +777,8 @@ impl SettingsView {
         ));
         for (title, indices) in [
             ("Tabs", &[0, 1, 6][..]),
-            ("Panes", &[2, 3, 7, 8][..]),
-            ("Workspaces", &[4, 5][..]),
+            ("Panes", &[2, 3, 7, 8, 9, 11][..]),
+            ("Workspaces", &[4, 5, 10][..]),
         ] {
             let mut card = ui::card(p).mb_3().child(
                 div()

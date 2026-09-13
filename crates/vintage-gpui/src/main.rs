@@ -1,4 +1,5 @@
 //! Native workspace Preview, deliberately separate from production data.
+mod boxes;
 mod files;
 mod settings;
 mod settings_ui;
@@ -8,21 +9,23 @@ mod window_frame;
 mod workspace;
 
 use gpui::{
-    actions, div, fill, font, point, prelude::*, px, relative, rgb, size, svg, App, AssetSource,
-    Bounds, ClipboardItem, Context, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, FontStyle, FontWeight, GlobalElementId, InspectorElementId, KeyDownEvent,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, ShapedLine, Style, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle, Window, WindowBounds, WindowOptions,
+    actions, div, fill, font, outline, point, prelude::*, px, relative, rgb, rgba, size, svg, App,
+    AssetSource, BorderStyle, Bounds, ClipboardItem, Context, ElementId, ElementInputHandler,
+    Entity, EntityInputHandler, FocusHandle, FontStyle, FontWeight, GlobalElementId,
+    InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PathBuilder, Pixels, Point, ScrollDelta, ScrollWheelEvent, ShapedLine, Style,
+    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
 };
 use std::{
     borrow::Cow,
+    collections::HashMap,
     ops::Range,
     path::PathBuf,
+    rc::Rc,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use text_cache::TextCache;
+use text_cache::{StyleKey, TextCache};
 use vintage_core::composition::Composition;
 use vintage_core::focus::FocusReporter;
 use vintage_core::mouse::{Button, MouseAction};
@@ -31,9 +34,13 @@ use vintage_runtime::{
     native_sessions::{NativeSessions, Owner},
     Session,
 };
-use vintage_terminal::Snapshot;
+use vintage_terminal::{Snapshot, UnderlineKind};
+use workspace::button;
 
 actions!(preview, [Quit]);
+
+const DEFAULT_BACKGROUND: u32 = 0x191816;
+const SELECTED_BACKGROUND: u32 = 0x514736;
 
 struct Assets;
 
@@ -48,6 +55,12 @@ impl AssetSource for Assets {
     fn list(&self, _path: &str) -> anyhow::Result<Vec<gpui::SharedString>> {
         Ok(Vec::new())
     }
+}
+
+/// State of the scrollback search bar; `Some` while it is open.
+struct SearchBar {
+    composition: Composition,
+    focus: FocusHandle,
 }
 
 struct TerminalView {
@@ -67,13 +80,21 @@ struct TerminalView {
     cell_width: Pixels,
     line_height: Pixels,
     bounds: Option<Bounds<Pixels>>,
+    /// Physical-pixel-aligned origin of the terminal grid inside `bounds`.
+    origin: Point<Pixels>,
     composition: Composition,
     preedit_layout: Option<ShapedLine>,
     text_cache: TextCache<ShapedLine>,
+    box_glyphs: HashMap<(u32, u32, u32, u32), Option<Rc<boxes::Glyph>>>,
     selecting: Option<(usize, usize)>,
     scroll_remainder: f32,
     reported_buttons: [bool; 3],
     last_mouse_cell: Option<(usize, usize)>,
+    /// Application-provided terminal title for the pane header.
+    pane_title: Option<String>,
+    /// A bell rang while the terminal was not focused.
+    needs_attention: bool,
+    search: Option<SearchBar>,
     error: Option<String>,
 }
 
@@ -146,15 +167,78 @@ impl TerminalView {
             cell_width: px(8.),
             line_height: px(18.),
             bounds: None,
+            origin: point(px(0.), px(0.)),
             composition: Composition::default(),
             preedit_layout: None,
             text_cache: TextCache::default(),
+            box_glyphs: HashMap::new(),
             selecting: None,
             scroll_remainder: 0.,
             reported_buttons: [false; 3],
             last_mouse_cell: None,
+            pane_title: None,
+            needs_attention: false,
+            search: None,
             error: None,
         }
+    }
+
+    /// Pane header text: the live terminal title, else the shell name.
+    pub fn header_title(&self) -> &str {
+        self.pane_title.as_deref().unwrap_or(&self.shell_label)
+    }
+
+    /// Toggle the scrollback search bar for this terminal.
+    pub fn toggle_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.take().is_some() {
+            let _ = self.operate(|s| s.set_search(""), cx);
+            self.focus.focus(window, cx);
+        } else {
+            let focus = cx.focus_handle();
+            focus.focus(window, cx);
+            self.search = Some(SearchBar {
+                composition: Composition::default(),
+                focus,
+            });
+        }
+        cx.notify();
+    }
+
+    fn search_focused(&self, window: &Window) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|search| search.focus.is_focused(window))
+    }
+
+    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search = None;
+        let _ = self.operate(|s| s.set_search(""), cx);
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn update_search_pattern(&mut self, cx: &mut Context<Self>) {
+        let pattern = self
+            .search
+            .as_ref()
+            .map(|search| search.composition.text().to_owned());
+        if let Some(pattern) = pattern {
+            let _ = self.operate(|s| s.set_search(&pattern), cx);
+        }
+        cx.notify();
+    }
+
+    fn paste_into_search(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if let Some(search) = self.search.as_mut() {
+            if search.composition.text().chars().count() + text.chars().count() <= 256 {
+                let selection = search.composition.selection();
+                let _ = search.composition.replace(Some(selection), &text, None);
+            }
+        }
+        self.update_search_pattern(cx);
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) -> bool {
@@ -184,6 +268,7 @@ impl TerminalView {
                         self.reported_buttons = [false; 3];
                         self.last_mouse_cell = None;
                     }
+                    self.pane_title = snapshot.title.clone();
                     self.snapshot = Some(snapshot);
                     self.revision = revision;
                     self.error = session.error();
@@ -192,6 +277,15 @@ impl TerminalView {
                     retry = true;
                 }
             }
+            // Consume transient terminal events; clipboard text stays in
+            // flight and is never logged.
+            if let Some(text) = session.take_clipboard() {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+            if session.take_bell() && !self.focused {
+                self.needs_attention = true;
+                cx.notify();
+            }
         }
         drop(owner);
         self.report_focus(cx) || retry
@@ -199,7 +293,9 @@ impl TerminalView {
 
     fn update_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focused = window.is_window_active() && self.focus.is_focused(window);
-        if !self.focused {
+        if self.focused {
+            self.needs_attention = false;
+        } else {
             self.selecting = None;
             self.reported_buttons = [false; 3];
             self.last_mouse_cell = None;
@@ -287,7 +383,27 @@ impl TerminalView {
             }
         }
     }
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focused(window) {
+            let modifiers = event.keystroke.modifiers;
+            match event.keystroke.key.as_str() {
+                "escape" => self.close_search(window, cx),
+                "enter" | "return" => {
+                    if modifiers.shift {
+                        let _ = self.operate(|s| s.search_previous(), cx);
+                    } else {
+                        let _ = self.operate(|s| s.search_next(), cx);
+                    }
+                }
+                "c" if modifiers.control && modifiers.shift => self.copy(cx),
+                "v" if modifiers.control && modifiers.shift => self.paste_into_search(cx),
+                // Text lands here through the IME input handler instead; other
+                // keys bubble so workspace shortcuts keep working.
+                _ => return,
+            }
+            cx.stop_propagation();
+            return;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if modifiers.control && modifiers.shift && key.eq_ignore_ascii_case("c") {
@@ -334,11 +450,11 @@ impl TerminalView {
         }
     }
     fn cell_at(&self, point: Point<Pixels>) -> Option<(usize, usize)> {
-        let bounds = self.bounds?;
-        let column = ((point.x - bounds.left()) / self.cell_width)
+        self.bounds.as_ref()?;
+        let column = ((point.x - self.origin.x) / self.cell_width)
             .floor()
             .max(0.) as usize;
-        let row = ((point.y - bounds.top()) / self.line_height)
+        let row = ((point.y - self.origin.y) / self.line_height)
             .floor()
             .max(0.) as usize;
         Some((
@@ -481,12 +597,11 @@ impl TerminalView {
         }
     }
     fn cursor_bounds(&self) -> Option<Bounds<Pixels>> {
-        let (column, row) = self.snapshot.as_ref()?.cursor?;
-        let bounds = self.bounds?;
+        let cursor = self.snapshot.as_ref()?.cursor?;
         Some(Bounds::new(
             point(
-                bounds.left() + self.cell_width * column as f32,
-                bounds.top() + self.line_height * row as f32,
+                self.origin.x + self.cell_width * cursor.column as f32,
+                self.origin.y + self.line_height * cursor.row as f32,
             ),
             size(self.cell_width, self.line_height),
         ))
@@ -498,9 +613,17 @@ impl EntityInputHandler for TerminalView {
         &mut self,
         range: Range<usize>,
         actual: &mut Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
+        if self.search_focused(window) {
+            let text = self
+                .search
+                .as_ref()
+                .and_then(|search| search.composition.text_for_range(range.clone()))?;
+            *actual = Some(range);
+            return Some(text);
+        }
         let text = self.composition.text_for_range(range.clone())?;
         *actual = Some(range);
         Some(text)
@@ -508,28 +631,58 @@ impl EntityInputHandler for TerminalView {
     fn selected_text_range(
         &mut self,
         _: bool,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        if self.search_focused(window) {
+            return self.search.as_ref().map(|search| UTF16Selection {
+                range: search.composition.selection(),
+                reversed: false,
+            });
+        }
         Some(UTF16Selection {
             range: self.composition.selection(),
             reversed: false,
         })
     }
-    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+    fn marked_text_range(
+        &self,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Range<usize>> {
+        if self.search_focused(window) {
+            return self
+                .search
+                .as_ref()
+                .and_then(|search| search.composition.marked_range());
+        }
         self.composition.marked_range()
     }
-    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.composition.clear();
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                search.composition.clear();
+            }
+        } else {
+            self.composition.clear();
+        }
         cx.notify();
     }
     fn replace_text_in_range(
         &mut self,
         range: Option<Range<usize>>,
         text: &str,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                let range = range.or_else(|| Some(search.composition.selection()));
+                let _ = search.composition.replace(range, text, None);
+            }
+            self.update_search_pattern(cx);
+            return;
+        }
         match self.composition.replace(range, text, None) {
             Ok(()) => {
                 if self.send(self.composition.text().as_bytes().to_vec(), cx) {
@@ -545,9 +698,16 @@ impl EntityInputHandler for TerminalView {
         range: Option<Range<usize>>,
         text: &str,
         selected: Option<Range<usize>>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.search_focused(window) {
+            if let Some(search) = self.search.as_mut() {
+                let _ = search.composition.replace(range, text, selected);
+            }
+            self.update_search_pattern(cx);
+            return;
+        }
         if let Err(error) = self.composition.replace(range, text, selected) {
             self.error = Some(error.into());
         }
@@ -556,10 +716,13 @@ impl EntityInputHandler for TerminalView {
     fn bounds_for_range(
         &mut self,
         range: Range<usize>,
-        _: Bounds<Pixels>,
-        _: &mut Window,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        if self.search_focused(window) {
+            return Some(bounds);
+        }
         let cursor = self.cursor_bounds()?;
         let Some(layout) = &self.preedit_layout else {
             return Some(cursor);
@@ -574,9 +737,12 @@ impl EntityInputHandler for TerminalView {
     fn character_index_for_point(
         &mut self,
         point: Point<Pixels>,
-        _: &mut Window,
+        window: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
+        if self.search_focused(window) {
+            return None;
+        }
         let cursor = self.cursor_bounds()?;
         let layout = self.preedit_layout.as_ref()?;
         let index = layout.index_for_x(point.x - cursor.left())?;
@@ -588,8 +754,28 @@ struct TerminalElement {
     view: Entity<TerminalView>,
 }
 struct PaintState {
-    lines: Vec<(ShapedLine, Point<Pixels>)>,
+    runs: Vec<ShapedRun>,
+    glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)>,
 }
+/// One shaped stretch of cells plus what paint needs to decorate it.
+struct ShapedRun {
+    line: ShapedLine,
+    at: Point<Pixels>,
+    width: Pixels,
+    underline: Option<UnderlineKind>,
+    foreground: u32,
+}
+/// One stretch of same-style cells shaped together; every cell contributes
+/// exactly one glyph so GPUI can snap advances to the cell grid.
+struct Run {
+    row: usize,
+    column: usize,
+    cells: usize,
+    text: String,
+    style: StyleKey,
+    force_width: Option<Pixels>,
+}
+
 impl IntoElement for TerminalElement {
     type Element = Self;
     fn into_element(self) -> Self {
@@ -627,15 +813,24 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) -> PaintState {
         self.view.update(cx, |view, cx| {
+            let scale = window.scale_factor();
             let base_font = font(view.font_family.clone());
             let font_id = window.text_system().resolve_font(&base_font);
-            let cell_width = window
+            let advance = window
                 .text_system()
                 .advance(font_id, px(view.font_size), 'M')
                 .map(|s| s.width)
                 .unwrap_or(px(view.font_size * 0.6));
-            let line_height = px((view.font_size * 1.5).ceil());
+            // Whole physical pixels keep glyphs, strokes, and backgrounds on
+            // one pixel grid instead of drifting by fractions of a cell.
+            let cell_width = px((f32::from(advance) * scale).round().max(1.) / scale);
+            let line_height = px(((view.font_size * 1.5).ceil() * scale).round() / scale);
+            let origin = point(
+                px((f32::from(bounds.origin.x) * scale).round() / scale),
+                px((f32::from(bounds.origin.y) * scale).round() / scale),
+            );
             view.bounds = Some(bounds);
+            view.origin = origin;
             view.cell_width = cell_width;
             view.line_height = line_height;
             let columns = (bounds.size.width / cell_width).floor().clamp(2., 500.) as u16;
@@ -654,52 +849,141 @@ impl Element for TerminalElement {
             {
                 view.requested_size = dimensions;
             }
-            view.text_cache
-                .begin_frame(view.font_size, window.scale_factor());
-            let mut lines = Vec::new();
+            view.text_cache.begin_frame(view.font_size, scale);
+            let mut runs: Vec<ShapedRun> = Vec::new();
+            let mut glyphs: Vec<(Rc<boxes::Glyph>, Point<Pixels>, u32)> = Vec::new();
             if let Some(snapshot) = &view.snapshot {
+                let cache = &mut view.text_cache;
+                let font_size = view.font_size;
+                // Terminate the open run by shaping it into `runs`.
+                let mut flush = |run: &mut Option<Run>| {
+                    if let Some(run) = run.take() {
+                        let at = point(
+                            origin.x + cell_width * run.column as f32,
+                            origin.y + line_height * run.row as f32,
+                        );
+                        let line = cache.layout(&run.text, run.style, || {
+                            shape_run(
+                                window,
+                                &run.text,
+                                run.style,
+                                &base_font,
+                                font_size,
+                                run.force_width,
+                            )
+                        });
+                        runs.push(ShapedRun {
+                            line,
+                            at,
+                            width: px(f32::from(cell_width) * run.cells as f32),
+                            underline: run.style.underline,
+                            foreground: run.style.foreground,
+                        });
+                    }
+                };
+                let mut run: Option<Run> = None;
+                let mut open_row: Option<usize> = None;
                 for cell in &snapshot.cells {
-                    if cell.text.trim().is_empty() {
+                    if open_row != Some(cell.row) {
+                        flush(&mut run);
+                        open_row = Some(cell.row);
+                    }
+                    let (row, column, width) = (cell.row, cell.column, cell.width.max(1));
+                    let style = StyleKey {
+                        foreground: cell.foreground,
+                        bold: cell.bold,
+                        italic: cell.italic,
+                        underline: cell.underline,
+                        strikeout: cell.strikeout,
+                    };
+                    let first = cell.text.chars().next();
+                    if first.is_some_and(boxes::is_drawn) {
+                        flush(&mut run);
+                        let ch = first.unwrap();
+                        let key = (
+                            ch as u32,
+                            f32::from(cell_width).to_bits(),
+                            f32::from(line_height).to_bits(),
+                            scale.to_bits(),
+                        );
+                        let entry = view
+                            .box_glyphs
+                            .entry(key)
+                            .or_insert_with(|| {
+                                boxes::glyph(ch, cell_width, line_height, scale).map(Rc::new)
+                            })
+                            .clone();
+                        if let Some(glyph) = entry {
+                            glyphs.push((
+                                glyph,
+                                point(
+                                    origin.x + cell_width * column as f32,
+                                    origin.y + line_height * row as f32,
+                                ),
+                                cell.foreground,
+                            ));
+                        }
                         continue;
                     }
-                    let line = view.text_cache.layout(cell, || {
-                        let mut font = base_font.clone();
-                        if cell.bold {
-                            font.weight = FontWeight::BOLD;
+                    let blank = cell.underline.is_none()
+                        && !cell.strikeout
+                        && cell.text.chars().all(char::is_whitespace);
+                    if blank {
+                        // Blanks only join a run that paints nothing over
+                        // them, and keep the run's cell count aligned.
+                        match &mut run {
+                            Some(active)
+                                if active.row == row
+                                    && active.column + active.cells == column
+                                    && active.style.underline.is_none()
+                                    && !active.style.strikeout =>
+                            {
+                                active.cells += 1;
+                                active.text.push(' ');
+                            }
+                            _ => flush(&mut run),
                         }
-                        if cell.italic {
-                            font.style = FontStyle::Italic;
+                        continue;
+                    }
+                    // Wide characters and combining sequences shape on their
+                    // own so every run glyph stays one cell wide.
+                    let solo = width != 1 || cell.text.chars().count() != 1;
+                    if solo {
+                        flush(&mut run);
+                        let mut solo = Some(Run {
+                            row,
+                            column,
+                            cells: 1,
+                            text: cell.text.clone(),
+                            style,
+                            force_width: None,
+                        });
+                        flush(&mut solo);
+                        continue;
+                    }
+                    match &mut run {
+                        Some(active)
+                            if active.row == row
+                                && active.column + active.cells == column
+                                && active.style == style =>
+                        {
+                            active.cells += 1;
+                            active.text.push_str(&cell.text);
                         }
-                        let run = TextRun {
-                            len: cell.text.len(),
-                            font,
-                            color: rgb(cell.foreground).into(),
-                            background_color: None,
-                            underline: cell.underline.then_some(UnderlineStyle {
-                                color: None,
-                                thickness: px(1.),
-                                wavy: false,
-                            }),
-                            strikethrough: cell.strikeout.then_some(gpui::StrikethroughStyle {
-                                color: None,
-                                thickness: px(1.),
-                            }),
-                        };
-                        window.text_system().shape_line(
-                            cell.text.clone().into(),
-                            px(view.font_size),
-                            &[run],
-                            None,
-                        )
-                    });
-                    lines.push((
-                        line,
-                        point(
-                            bounds.left() + cell_width * cell.column as f32,
-                            bounds.top() + line_height * cell.row as f32,
-                        ),
-                    ));
+                        _ => {
+                            flush(&mut run);
+                            run = Some(Run {
+                                row,
+                                column,
+                                cells: 1,
+                                text: cell.text.clone(),
+                                style,
+                                force_width: Some(cell_width),
+                            });
+                        }
+                    }
                 }
+                flush(&mut run);
             }
             view.text_cache.end_frame();
             view.preedit_layout = None;
@@ -724,10 +1008,16 @@ impl Element for TerminalElement {
                         None,
                     );
                     view.preedit_layout = Some(line.clone());
-                    lines.push((line, cursor.origin));
+                    runs.push(ShapedRun {
+                        line,
+                        at: cursor.origin,
+                        width: px(0.),
+                        underline: None,
+                        foreground: 0xc6a66b,
+                    });
                 }
             }
-            PaintState { lines }
+            PaintState { runs, glyphs }
         })
     }
     fn paint(
@@ -749,38 +1039,80 @@ impl Element for TerminalElement {
             );
         }
         if let Some(snapshot) = &view.snapshot {
+            // Backgrounds paint first, merged into horizontal stretches.
+            let mut stretch: Option<(usize, usize, usize, u32)> = None;
             for cell in &snapshot.cells {
-                if cell.background != 0x191816 || cell.selected {
+                let color = if cell.selected {
+                    SELECTED_BACKGROUND
+                } else {
+                    cell.background
+                };
+                let paints = cell.selected || color != DEFAULT_BACKGROUND;
+                let extends = paints
+                    && matches!(&stretch, Some((row, start, len, drawn))
+                        if *row == cell.row && *start + *len == cell.column && *drawn == color);
+                if extends {
+                    if let Some((_, _, len, _)) = &mut stretch {
+                        *len += cell.width.max(1);
+                    }
+                    continue;
+                }
+                paint_stretch(window, view, &stretch);
+                stretch = paints.then(|| (cell.row, cell.column, cell.width.max(1), color));
+            }
+            paint_stretch(window, view, &stretch);
+            // Search highlights sit on top of backgrounds and under text.
+            if let Some(search) = &snapshot.search {
+                for rect in &search.rects {
+                    let (start, end) = (rect.start, rect.end);
                     let area = Bounds::new(
                         point(
-                            bounds.left() + view.cell_width * cell.column as f32,
-                            bounds.top() + view.line_height * cell.row as f32,
+                            view.origin.x + view.cell_width * start.0 as f32,
+                            view.origin.y + view.line_height * start.1 as f32,
                         ),
-                        size(view.cell_width * cell.width as f32, view.line_height),
+                        size(
+                            view.cell_width * (end.0 - start.0 + 1) as f32,
+                            view.line_height,
+                        ),
                     );
                     window.paint_quad(fill(
                         area,
-                        rgb(if cell.selected {
-                            0x514736
-                        } else {
-                            cell.background
-                        }),
+                        rgba(if rect.active { 0xe8aa8299 } else { 0xc6a66b40 }),
                     ));
                 }
             }
-            if window.is_window_active()
-                && view.focus.is_focused(window)
-                && view.composition.text().is_empty()
-            {
+            // Box drawing and block glyphs drawn as vectors over the
+            // backgrounds and under the text.
+            for (glyph, at, foreground) in &state.glyphs {
+                paint_glyph(window, glyph, *at, *foreground);
+            }
+            // Underline decorations span whole runs, painted below the text.
+            let thickness = px((f32::from(view.line_height) / 12.).round().max(1.));
+            for run in &state.runs {
+                if let Some(kind) = run.underline {
+                    paint_underline(
+                        window,
+                        run.at,
+                        run.width,
+                        view.line_height,
+                        thickness,
+                        kind,
+                        run.foreground,
+                    );
+                }
+            }
+            if window.is_window_active() && view.composition.text().is_empty() {
+                let focused = view.focus.is_focused(window);
                 if let Some(cursor) = view.cursor_bounds() {
-                    window.paint_quad(fill(cursor, gpui::rgba(0xc6a66b66)));
+                    paint_cursor(window, view, cursor, focused);
                 }
             }
         }
         let line_height = view.line_height;
-        for (line, origin) in &state.lines {
-            if line
-                .paint(*origin, line_height, TextAlign::Left, None, window, cx)
+        for run in &state.runs {
+            if run
+                .line
+                .paint(run.at, line_height, TextAlign::Left, None, window, cx)
                 .is_err()
             {
                 // Report a generic failure only; never log terminal content.
@@ -792,6 +1124,207 @@ impl Element for TerminalElement {
     }
 }
 
+/// Shape one text run with the style applied to every cell.
+fn shape_run(
+    window: &mut Window,
+    text: &str,
+    style: StyleKey,
+    base_font: &gpui::Font,
+    font_size: f32,
+    force_width: Option<Pixels>,
+) -> ShapedLine {
+    let mut font = base_font.clone();
+    if style.bold {
+        font.weight = FontWeight::BOLD;
+    }
+    if style.italic {
+        font.style = FontStyle::Italic;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: rgb(style.foreground).into(),
+        background_color: None,
+        // Underlines paint as whole-run rectangles in `paint_underline` so
+        // every style spans full cells like Alacritty's.
+        underline: None,
+        strikethrough: style.strikeout.then_some(gpui::StrikethroughStyle {
+            color: None,
+            thickness: px(1.),
+        }),
+    };
+    window
+        .text_system()
+        .shape_line(text.to_owned().into(), px(font_size), &[run], force_width)
+}
+
+/// Draw one underline decoration across a whole run.
+fn paint_underline(
+    window: &mut Window,
+    at: Point<Pixels>,
+    width: Pixels,
+    line_height: Pixels,
+    thickness: Pixels,
+    kind: UnderlineKind,
+    foreground: u32,
+) {
+    let base = at.y + line_height - thickness;
+    let mut rect = |x: f32, y: Pixels, w: f32| {
+        window.paint_quad(fill(
+            Bounds::new(point(at.x + px(x), y), size(px(w), thickness)),
+            rgb(foreground),
+        ));
+    };
+    match kind {
+        UnderlineKind::Single => rect(0., base, f32::from(width)),
+        UnderlineKind::Double => {
+            rect(0., base, f32::from(width));
+            rect(0., base - thickness - px(1.), f32::from(width));
+        }
+        UnderlineKind::Dotted | UnderlineKind::Dashed => {
+            // Even dots, or longer dashes with a wider gap.
+            let (dash, gap) = match kind {
+                UnderlineKind::Dashed => (3., 2.),
+                _ => (1., 1.),
+            };
+            let mut x = 0.;
+            while x < f32::from(width) {
+                rect(
+                    x,
+                    base,
+                    (dash * f32::from(thickness)).min(f32::from(width) - x),
+                );
+                x += (dash + gap) * f32::from(thickness);
+            }
+        }
+        UnderlineKind::Curly => {
+            // Zigzag stroke with one peak per period.
+            let amplitude = f32::from(thickness);
+            let period = amplitude * 6.;
+            let middle = base - thickness;
+            let mut builder = PathBuilder::stroke(thickness);
+            builder.move_to(point(at.x, middle));
+            let mut x = 0.;
+            let mut up = true;
+            while x + period / 2. <= f32::from(width) {
+                x += period / 2.;
+                builder.line_to(point(
+                    at.x + px(x),
+                    middle + px(if up { -amplitude } else { amplitude }),
+                ));
+                up = !up;
+            }
+            builder.line_to(point(at.x + width, middle));
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, rgb(foreground));
+            }
+        }
+    }
+}
+
+/// Draw the cursor in the style the application requested.
+fn paint_cursor(window: &mut Window, view: &TerminalView, cursor: Bounds<Pixels>, focused: bool) {
+    let style = view
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.cursor.as_ref())
+        .map(|cursor| cursor.style)
+        .unwrap_or(vintage_terminal::CursorStyle::Block);
+    if !focused {
+        // Hollow cursor marks an active but unfocused pane.
+        window.paint_quad(outline(cursor, rgb(0xc6a66b), BorderStyle::default()));
+        return;
+    }
+    match style {
+        vintage_terminal::CursorStyle::Beam => {
+            let width = px((f32::from(view.cell_width) / 4.).round().max(1.));
+            window.paint_quad(fill(
+                Bounds::new(cursor.origin, size(width, cursor.size.height)),
+                gpui::rgba(0xc6a66b99),
+            ));
+        }
+        vintage_terminal::CursorStyle::Underline => {
+            let height = px((f32::from(view.line_height) / 12.).round().max(1.));
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(
+                        cursor.origin.x,
+                        cursor.origin.y + cursor.size.height - height,
+                    ),
+                    size(cursor.size.width, height),
+                ),
+                gpui::rgba(0xc6a66b99),
+            ));
+        }
+        vintage_terminal::CursorStyle::HollowBlock => {
+            window.paint_quad(outline(cursor, rgb(0xc6a66b), BorderStyle::default()));
+        }
+        vintage_terminal::CursorStyle::Block => {
+            window.paint_quad(fill(cursor, gpui::rgba(0xc6a66b66)));
+        }
+    }
+}
+
+fn paint_stretch(
+    window: &mut Window,
+    view: &TerminalView,
+    stretch: &Option<(usize, usize, usize, u32)>,
+) {
+    let Some((row, column, len, color)) = stretch else {
+        return;
+    };
+    let area = Bounds::new(
+        point(
+            view.origin.x + view.cell_width * *column as f32,
+            view.origin.y + view.line_height * *row as f32,
+        ),
+        size(view.cell_width * *len as f32, view.line_height),
+    );
+    window.paint_quad(fill(area, rgb(*color)));
+}
+
+fn paint_glyph(window: &mut Window, glyph: &boxes::Glyph, at: Point<Pixels>, foreground: u32) {
+    let at = (f32::from(at.x), f32::from(at.y));
+    let at_point = |x: f32, y: f32| point(px(at.0 + x), px(at.1 + y));
+    for [x, y, width, height] in &glyph.rects {
+        window.paint_quad(fill(
+            Bounds::new(at_point(*x, *y), size(px(*width), px(*height))),
+            rgb(foreground),
+        ));
+    }
+    for ([x, y, width, height], alpha) in &glyph.tints {
+        window.paint_quad(fill(
+            Bounds::new(at_point(*x, *y), size(px(*width), px(*height))),
+            rgba((foreground << 8) | *alpha as u32),
+        ));
+    }
+    for stroke in &glyph.strokes {
+        let mut builder = PathBuilder::stroke(px(stroke.width));
+        if let Some(first) = stroke.points.first() {
+            builder.move_to(at_point(first[0], first[1]));
+        }
+        for point in stroke.points.iter().skip(1) {
+            builder.line_to(at_point(point[0], point[1]));
+        }
+        if let Ok(path) = builder.build() {
+            window.paint_path(path, rgb(foreground));
+        }
+    }
+    for polygon in &glyph.polygons {
+        let mut builder = PathBuilder::fill();
+        if let Some(first) = polygon.first() {
+            builder.move_to(at_point(first[0], first[1]));
+        }
+        for p in polygon.iter().skip(1) {
+            builder.line_to(at_point(p[0], p[1]));
+        }
+        builder.close();
+        if let Ok(path) = builder.build() {
+            window.paint_path(path, rgb(foreground));
+        }
+    }
+}
+
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::Palette::new(window, cx);
@@ -799,9 +1332,83 @@ impl Render for TerminalView {
         let status = self.error.clone().or_else(|| owner.error.clone()).unwrap_or_else(|| {
             if owner.startup.is_some() { "Starting shell…".into() }
             else if owner.session.as_ref().is_some_and(Session::exited) { "Shell exited — output remains available".into() }
-            else { format!("{} × {}  ·  {} px  ·  Ctrl+Shift+C/V copy/paste  ·  Shift+wheel select scrollback", self.requested_size.columns, self.requested_size.rows, self.font_size) }
+            else {
+                let search_hint = cx
+                    .global::<theme::Preferences>()
+                    .0
+                    .bindings[9]
+                    .label();
+                format!("{} × {}  ·  {} px  ·  Ctrl+Shift+C/V copy/paste  ·  Shift+wheel select scrollback  ·  {search_hint} search", self.requested_size.columns, self.requested_size.rows, self.font_size)
+            }
         });
         drop(owner);
+        let search_bar = self.search.as_ref().map(|search| {
+            let entity = cx.entity();
+            let focus = search.focus.clone();
+            let text = search.composition.text().to_owned();
+            let status = self
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.search.as_ref())
+                .map(|search| {
+                    if search.invalid {
+                        "Invalid pattern".to_owned()
+                    } else if search.total == 0 {
+                        "No matches".to_owned()
+                    } else {
+                        format!("{}/{}", (search.active + 1).min(search.total), search.total)
+                    }
+                });
+            div()
+                .h(gpui::rems(1.75))
+                .flex_none()
+                .px_2()
+                .flex()
+                .items_center()
+                .gap_3()
+                .bg(palette.color(0x201f1c))
+                .border_b_1()
+                .border_color(palette.color(0x39352e))
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_size(gpui::rems(0.75))
+                        .text_color(palette.color(0xe6e1d8))
+                        // Join the key dispatch tree so Enter/Escape reach the
+                        // terminal's key handler while the input is focused.
+                        .track_focus(&search.focus)
+                        .child(text)
+                        .child(
+                            gpui::canvas(
+                                |_, _, _| (),
+                                move |bounds, _, window, cx| {
+                                    window.handle_input(
+                                        &focus,
+                                        ElementInputHandler::new(bounds, entity),
+                                        cx,
+                                    );
+                                },
+                            )
+                            .absolute()
+                            .size_full(),
+                        ),
+                )
+                .children(status.map(|status| {
+                    div()
+                        .flex_none()
+                        .text_size(gpui::rems(0.6875))
+                        .text_color(palette.color(0xbab1a1))
+                        .child(status)
+                }))
+                .child(
+                    button("close-search", "×").on_click(cx.listener(|view, _, window, cx| {
+                        view.close_search(window, cx);
+                    })),
+                )
+        });
         div()
             .size_full()
             .flex()
@@ -810,6 +1417,7 @@ impl Render for TerminalView {
             .text_color(palette.color(0xe6e1d8))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .children(search_bar)
             .child(
                 div()
                     .id("terminal-surface")
@@ -884,7 +1492,7 @@ fn main() -> anyhow::Result<()> {
                 exit_after = Some(seconds);
             }
             "--help" => {
-                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane\nCtrl+comma: settings; Ctrl+Shift+F: files; drag window edges to resize");
+                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane; Ctrl+B: sidebar\nCtrl+comma: settings; Ctrl+Shift+F: files; Ctrl+Shift+G: search; drag window edges to resize");
                 return Ok(());
             }
             "--list-shells" => {

@@ -229,14 +229,14 @@ impl WorkspaceView {
             self.sessions.close(id);
         }
         for (id, root) in panes {
-            self.terminals.entry(id).or_insert_with(|| {
+            if let std::collections::btree_map::Entry::Vacant(vacant) = self.terminals.entry(id) {
                 let owner = self.sessions.start_with_scrollback(
                     id,
                     root,
                     self.shell.clone(),
                     cx.global::<crate::theme::Preferences>().0.scrollback,
                 );
-                cx.new(|cx| {
+                let view = cx.new(|cx| {
                     let mut view = TerminalView::new(owner, window, cx);
                     view.shell_label = PathBuf::from(&self.shell)
                         .file_name()
@@ -244,8 +244,12 @@ impl WorkspaceView {
                         .to_string_lossy()
                         .into_owned();
                     view
-                })
-            });
+                });
+                // Titles and bell markers live in this view, so repaint the
+                // workspace chrome when it changes.
+                cx.observe(&view, |_, _, cx| cx.notify()).detach();
+                vacant.insert(view);
+            }
         }
         self.synchronize_files(cx);
         self.focus_active(window, cx);
@@ -462,16 +466,6 @@ impl WorkspaceView {
             cx.stop_propagation();
             return;
         }
-        if modifiers.control
-            && !modifiers.alt
-            && !modifiers.shift
-            && !modifiers.platform
-            && event.keystroke.key.eq_ignore_ascii_case("b")
-        {
-            self.toggle_sidebar(window, cx);
-            cx.stop_propagation();
-            return;
-        }
         if modifiers.control && !modifiers.alt && !modifiers.platform && event.keystroke.key == ","
         {
             self.toggle_settings(window, cx);
@@ -497,6 +491,19 @@ impl WorkspaceView {
                     6 => self.add_tab(window, cx),
                     7 => self.split(Axis::Horizontal, window, cx),
                     8 => self.split(Axis::Vertical, window, cx),
+                    9 => {
+                        if let Some(pane) = self.model.tab().map(|tab| tab.active_pane) {
+                            if let Some(terminal) = self.terminals.get(&pane) {
+                                terminal.update(cx, |view, cx| view.toggle_search(window, cx));
+                            }
+                        }
+                    }
+                    10 => self.toggle_sidebar(window, cx),
+                    11 => {
+                        if let Some(pane) = self.model.tab().map(|tab| tab.active_pane) {
+                            self.close_pane(pane, window, cx);
+                        }
+                    }
                     _ => unreachable!("settings validation limits shortcut actions"),
                 }
                 cx.stop_propagation();
@@ -510,11 +517,6 @@ impl WorkspaceView {
             "f" => self.toggle_files(window, cx),
 
             "o" => self.open_workspace(window, cx),
-            "w" => {
-                if let Some(pane) = self.model.tab().map(|t| t.active_pane) {
-                    self.close_pane(pane, window, cx);
-                }
-            }
             "tab" => {
                 if let Some(w) = self.model.current() {
                     if let Some(i) = w.tabs.iter().position(|t| Some(t.id) == w.active_tab) {
@@ -620,15 +622,26 @@ impl WorkspaceView {
                                     .overflow_hidden()
                                     .text_size(gpui::rems(0.75))
                                     .text_color(rgb(if active { 0xe6e1d8 } else { 0xbab1a1 }))
-                                    .child(format!("Terminal · {}", terminal.read(cx).shell_label)),
+                                    .child(format!(
+                                        "Terminal · {}",
+                                        terminal.read(cx).header_title()
+                                    )),
                             )
                             .child(
                                 div()
                                     .flex_none()
                                     .mr_2()
                                     .text_size(gpui::rems(0.75))
-                                    .text_color(rgb(Self::activity_color(activity)))
-                                    .child(Self::activity_mark(activity)),
+                                    .text_color(rgb(if terminal.read(cx).needs_attention {
+                                        0xe8aa82
+                                    } else {
+                                        Self::activity_color(activity)
+                                    }))
+                                    .child(if terminal.read(cx).needs_attention {
+                                        "!"
+                                    } else {
+                                        Self::activity_mark(activity)
+                                    }),
                             )
                             .child(
                                 button(("close-pane", id), "×")
@@ -802,6 +815,11 @@ impl Render for WorkspaceView {
                 } else {
                     activity
                 };
+                let bell = tab.layout.panes().into_iter().any(|pane| {
+                    self.terminals
+                        .get(&pane)
+                        .is_some_and(|terminal| terminal.read(cx).needs_attention)
+                });
                 group = group.child(
                     div()
                         .id(("sidebar-tab", tab_id))
@@ -820,7 +838,11 @@ impl Render for WorkspaceView {
                         }))
                         .child(format!(
                             "{}  {}  ·  {}",
-                            Self::activity_mark(activity),
+                            if bell {
+                                "!"
+                            } else {
+                                Self::activity_mark(activity)
+                            },
                             tab.title,
                             tab.layout.panes().len()
                         )),
@@ -847,123 +869,131 @@ impl Render for WorkspaceView {
                 } else {
                     activity
                 };
-                tabs =
-                    tabs.child(
-                        div()
-                            .id(("tab", id))
-                            .flex()
-                            .items_center()
-                            .flex_none()
-                            .h_full()
-                            .px_3()
-                            .gap_2()
-                            .border_b_2()
-                            .border_color(rgb(if workspace.active_tab == Some(id) {
-                                0xc6a66b
-                            } else {
-                                0x201f1c
-                            }))
-                            .bg(rgb(if workspace.active_tab == Some(id) {
-                                0x2b2923
-                            } else {
-                                0x201f1c
-                            }))
-                            .text_color(rgb(if workspace.active_tab == Some(id) {
-                                0xe6e1d8
-                            } else {
-                                0x9b958a
-                            }))
-                            .cursor_pointer()
-                            .on_click(cx.listener(
-                                move |view, event: &gpui::ClickEvent, window, cx| {
-                                    if event.click_count() == 2 {
-                                        view.start_rename(id, window, cx);
-                                    } else {
-                                        view.activate(workspace_id, Some(id), window, cx);
-                                    }
-                                },
-                            ))
-                            .child(div().size(px(6.)).rounded_full().bg(rgb(
-                                if activity.is_some() {
-                                    Self::activity_color(activity)
-                                } else if workspace.active_tab == Some(id) {
-                                    0xc6a66b
+                let bell = tab.layout.panes().into_iter().any(|pane| {
+                    self.terminals
+                        .get(&pane)
+                        .is_some_and(|terminal| terminal.read(cx).needs_attention)
+                });
+                tabs = tabs.child(
+                    div()
+                        .id(("tab", id))
+                        .flex()
+                        .items_center()
+                        .flex_none()
+                        .h_full()
+                        .px_3()
+                        .gap_2()
+                        .border_b_2()
+                        .border_color(rgb(if workspace.active_tab == Some(id) {
+                            0xc6a66b
+                        } else {
+                            0x201f1c
+                        }))
+                        .bg(rgb(if workspace.active_tab == Some(id) {
+                            0x2b2923
+                        } else {
+                            0x201f1c
+                        }))
+                        .text_color(rgb(if workspace.active_tab == Some(id) {
+                            0xe6e1d8
+                        } else {
+                            0x9b958a
+                        }))
+                        .cursor_pointer()
+                        .on_click(
+                            cx.listener(move |view, event: &gpui::ClickEvent, window, cx| {
+                                if event.click_count() == 2 {
+                                    view.start_rename(id, window, cx);
                                 } else {
-                                    0x544936
-                                },
-                            )))
-                            .child(
-                                div()
-                                    .relative()
-                                    .min_w(px(96.))
-                                    .text_size(gpui::rems(0.8125))
-                                    .when(
-                                        self.rename
-                                            .as_ref()
-                                            .is_some_and(|(renaming, _)| *renaming == id),
-                                        |input| {
-                                            let (_, composition) = self.rename.as_ref().unwrap();
-                                            let entity = cx.entity().clone();
-                                            let focus = self.rename_focus.clone();
-                                            input
-                                                .px_1()
-                                                .bg(rgb(0x191816))
-                                                .border_1()
-                                                .border_color(rgb(0xc6a66b))
-                                                .child(composition.text().to_owned())
-                                                .child(
-                                                    gpui::canvas(
-                                                        |_, _, _| (),
-                                                        move |bounds, _, window, cx| {
-                                                            window.handle_input(
-                                                                &focus,
-                                                                ElementInputHandler::new(
-                                                                    bounds, entity,
-                                                                ),
-                                                                cx,
-                                                            );
-                                                        },
-                                                    )
-                                                    .absolute()
-                                                    .size_full(),
+                                    view.activate(workspace_id, Some(id), window, cx);
+                                }
+                            }),
+                        )
+                        .child(div().size(px(6.)).rounded_full().bg(rgb(if bell {
+                            0xe8aa82
+                        } else if activity.is_some() {
+                            Self::activity_color(activity)
+                        } else if workspace.active_tab == Some(id) {
+                            0xc6a66b
+                        } else {
+                            0x544936
+                        })))
+                        .child(
+                            div()
+                                .relative()
+                                .min_w(px(96.))
+                                .text_size(gpui::rems(0.8125))
+                                .when(
+                                    self.rename
+                                        .as_ref()
+                                        .is_some_and(|(renaming, _)| *renaming == id),
+                                    |input| {
+                                        let (_, composition) = self.rename.as_ref().unwrap();
+                                        let entity = cx.entity().clone();
+                                        let focus = self.rename_focus.clone();
+                                        input
+                                            // Join the key dispatch tree so
+                                            // Enter/Escape reach the workspace
+                                            // key handler during rename.
+                                            .track_focus(&focus)
+                                            .px_1()
+                                            .bg(rgb(0x191816))
+                                            .border_1()
+                                            .border_color(rgb(0xc6a66b))
+                                            .child(composition.text().to_owned())
+                                            .child(
+                                                gpui::canvas(
+                                                    |_, _, _| (),
+                                                    move |bounds, _, window, cx| {
+                                                        window.handle_input(
+                                                            &focus,
+                                                            ElementInputHandler::new(
+                                                                bounds, entity,
+                                                            ),
+                                                            cx,
+                                                        );
+                                                    },
                                                 )
-                                        },
-                                    )
-                                    .when(
-                                        self.rename
-                                            .as_ref()
-                                            .is_none_or(|(renaming, _)| *renaming != id),
-                                        |label| label.child(tab.title.clone()),
-                                    ),
-                            )
-                            .when(
-                                self.rename
-                                    .as_ref()
-                                    .is_some_and(|(renaming, _)| *renaming == id),
-                                |tab| {
-                                    tab.child(button(("save-tab-name", id), "✓").on_click(
-                                        cx.listener(move |view, _, window, cx| {
+                                                .absolute()
+                                                .size_full(),
+                                            )
+                                    },
+                                )
+                                .when(
+                                    self.rename
+                                        .as_ref()
+                                        .is_none_or(|(renaming, _)| *renaming != id),
+                                    |label| label.child(tab.title.clone()),
+                                ),
+                        )
+                        .when(
+                            self.rename
+                                .as_ref()
+                                .is_some_and(|(renaming, _)| *renaming == id),
+                            |tab| {
+                                tab.child(button(("save-tab-name", id), "✓").on_click(cx.listener(
+                                    move |view, _, window, cx| {
+                                        cx.stop_propagation();
+                                        view.commit_rename(window, cx);
+                                    },
+                                )))
+                                .child(
+                                    button(("cancel-tab-name", id), "×").on_click(cx.listener(
+                                        move |view, _, window, cx| {
                                             cx.stop_propagation();
-                                            view.commit_rename(window, cx);
-                                        }),
-                                    ))
-                                    .child(
-                                        button(("cancel-tab-name", id), "×").on_click(cx.listener(
-                                            move |view, _, window, cx| {
-                                                cx.stop_propagation();
-                                                view.cancel_rename(window, cx);
-                                            },
-                                        )),
-                                    )
-                                },
-                            )
-                            .child(button(("close-tab", id), "×").on_click(cx.listener(
-                                move |view, _, window, cx| {
-                                    cx.stop_propagation();
-                                    view.close_tab(id, window, cx);
-                                },
-                            ))),
-                    );
+                                            view.cancel_rename(window, cx);
+                                        },
+                                    )),
+                                )
+                            },
+                        )
+                        .child(button(("close-tab", id), "×").on_click(cx.listener(
+                            move |view, _, window, cx| {
+                                cx.stop_propagation();
+                                view.close_tab(id, window, cx);
+                            },
+                        ))),
+                );
             }
         }
         tabs = tabs.child(
