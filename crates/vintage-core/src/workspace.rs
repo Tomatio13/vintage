@@ -11,9 +11,19 @@ pub enum Axis {
     Vertical,
 }
 
+/// What a pane displays; file panes own no PTY or native resources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaneKind {
+    Terminal,
+    File { path: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Layout {
-    Pane(Id),
+    Pane {
+        id: Id,
+        kind: PaneKind,
+    },
     Split {
         axis: Axis,
         first: Box<Layout>,
@@ -22,35 +32,44 @@ pub enum Layout {
 }
 impl Layout {
     pub fn panes(&self) -> Vec<Id> {
+        self.panes_with_kinds()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    }
+    pub fn panes_with_kinds(&self) -> Vec<(Id, PaneKind)> {
         match self {
-            Self::Pane(id) => vec![*id],
+            Self::Pane { id, kind } => vec![(*id, kind.clone())],
             Self::Split { first, second, .. } => {
-                let mut ids = first.panes();
-                ids.extend(second.panes());
-                ids
+                let mut items = first.panes_with_kinds();
+                items.extend(second.panes_with_kinds());
+                items
             }
         }
     }
-    fn split(&mut self, target: Id, new: Id, axis: Axis, depth: usize) -> bool {
+    fn split(&mut self, target: Id, new: Id, kind: PaneKind, axis: Axis, depth: usize) -> bool {
         match self {
-            Self::Pane(id) if *id == target && depth < MAX_DEPTH => {
+            Self::Pane { id, kind: kept } if *id == target && depth < MAX_DEPTH => {
                 *self = Self::Split {
                     axis,
-                    first: Box::new(Self::Pane(target)),
-                    second: Box::new(Self::Pane(new)),
+                    first: Box::new(Self::Pane {
+                        id: target,
+                        kind: kept.clone(),
+                    }),
+                    second: Box::new(Self::Pane { id: new, kind }),
                 };
                 true
             }
             Self::Split { first, second, .. } => {
-                first.split(target, new, axis, depth + 1)
-                    || second.split(target, new, axis, depth + 1)
+                first.split(target, new, kind.clone(), axis, depth + 1)
+                    || second.split(target, new, kind, axis, depth + 1)
             }
             _ => false,
         }
     }
     fn remove(self, target: Id) -> Option<Self> {
         match self {
-            Self::Pane(id) => (id != target).then_some(Self::Pane(id)),
+            Self::Pane { id, .. } => (id != target).then_some(self),
             Self::Split {
                 axis,
                 first,
@@ -165,7 +184,7 @@ impl Workspaces {
             return Err("Workspace limit reached (16)");
         }
         if self.pane_count() >= MAX_PANES {
-            return Err("Terminal limit reached (64)");
+            return Err("Pane limit reached (64)");
         }
         let id = self.id();
         self.items.push(Workspace {
@@ -201,7 +220,10 @@ impl Workspaces {
         w.tabs.push(Tab {
             id,
             title: format!("Terminal {}", w.next_tab),
-            layout: Layout::Pane(pane),
+            layout: Layout::Pane {
+                id: pane,
+                kind: PaneKind::Terminal,
+            },
             active_pane: pane,
         });
         w.active_tab = Some(id);
@@ -235,10 +257,10 @@ impl Workspaces {
     }
     pub fn split(&mut self, axis: Axis) -> Result<Id, &'static str> {
         if self.pane_count() >= MAX_PANES {
-            return Err("Terminal limit reached (64)");
+            return Err("Pane limit reached (64)");
         }
         if self.tab().is_none() {
-            return Err("Open a terminal tab first");
+            return Err("Open a tab first");
         }
         let new = self.id();
         let w = self.current_mut().unwrap();
@@ -247,11 +269,59 @@ impl Workspaces {
             .iter_mut()
             .find(|t| Some(t.id) == w.active_tab)
             .unwrap();
-        if !t.layout.split(t.active_pane, new, axis, 0) {
+        if !t
+            .layout
+            .split(t.active_pane, new, PaneKind::Terminal, axis, 0)
+        {
             return Err("Split depth limit reached (8)");
         }
         t.active_pane = new;
         Ok(new)
+    }
+    /// Open a read-only file viewer pane beside the active pane, or focus the
+    /// pane already showing the same file. The path is a normalized workspace
+    /// relative path; the file service re-validates it before every read.
+    pub fn open_file_pane(&mut self, path: &str) -> Result<Id, &'static str> {
+        let path = validate_relative_path(path)?;
+        if self.pane_count() >= MAX_PANES {
+            return Err("Pane limit reached (64)");
+        }
+        if let Some(existing) = self.file_pane(&path) {
+            self.focus(existing);
+            return Ok(existing);
+        }
+        if self.tab().is_none() {
+            return Err("Open a tab first");
+        }
+        let new = self.id();
+        let w = self.current_mut().unwrap();
+        let t = w
+            .tabs
+            .iter_mut()
+            .find(|t| Some(t.id) == w.active_tab)
+            .unwrap();
+        if !t.layout.split(
+            t.active_pane,
+            new,
+            PaneKind::File { path },
+            Axis::Horizontal,
+            0,
+        ) {
+            return Err("Split depth limit reached (8)");
+        }
+        t.active_pane = new;
+        Ok(new)
+    }
+    /// The pane of the active tab that already shows this file, if any.
+    fn file_pane(&self, path: &str) -> Option<Id> {
+        self.tab()?
+            .layout
+            .panes_with_kinds()
+            .into_iter()
+            .find_map(|(id, kind)| match kind {
+                PaneKind::File { path: found } if found == path => Some(id),
+                _ => None,
+            })
     }
     pub fn close_pane(&mut self, pane: Id) -> Vec<Id> {
         let Some(w) = self.current_mut() else {
@@ -313,6 +383,24 @@ impl Workspaces {
         }
         removed
     }
+}
+/// Mirrors the file service's normalized relative path rules so invalid
+/// paths never enter workspace models.
+pub fn validate_relative_path(path: &str) -> Result<String, &'static str> {
+    if path.is_empty() {
+        return Err("Select a file to open");
+    }
+    if path.len() > 8192 {
+        return Err("The file path is too long");
+    }
+    if path.contains(['\\', ':', '\0'])
+        || !path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+    {
+        return Err("Use a normalized relative file path");
+    }
+    Ok(path.to_owned())
 }
 
 #[cfg(test)]
@@ -377,8 +465,14 @@ mod tests {
             state.tab().unwrap().layout,
             Layout::Split {
                 axis: Axis::Horizontal,
-                first: Box::new(Layout::Pane(first)),
-                second: Box::new(Layout::Pane(third))
+                first: Box::new(Layout::Pane {
+                    id: first,
+                    kind: PaneKind::Terminal
+                }),
+                second: Box::new(Layout::Pane {
+                    id: third,
+                    kind: PaneKind::Terminal
+                })
             }
         );
         state.close_pane(third);
@@ -388,6 +482,45 @@ mod tests {
         assert!(state.current().is_some());
         state.add_tab().unwrap();
         assert_eq!(state.pane_count(), 1);
+    }
+    #[test]
+    fn file_panes_split_beside_the_active_pane_and_dedupe_by_path() {
+        let mut state = Workspaces::default();
+        state.add_workspace("/a".into()).unwrap();
+        let terminal = state.tab().unwrap().active_pane;
+        let viewer = state.open_file_pane("docs/plan.md").unwrap();
+        assert_eq!(state.tab().unwrap().active_pane, viewer);
+        assert_eq!(state.open_file_pane("docs/plan.md").unwrap(), viewer);
+        assert_eq!(state.pane_count(), 2);
+        let other = state.split(Axis::Horizontal).unwrap();
+        assert_eq!(
+            state.tab().unwrap().layout.panes_with_kinds(),
+            vec![
+                (terminal, PaneKind::Terminal),
+                (
+                    viewer,
+                    PaneKind::File {
+                        path: "docs/plan.md".into()
+                    }
+                ),
+                (other, PaneKind::Terminal),
+            ]
+        );
+        state.close_pane(viewer);
+        assert_eq!(
+            state.tab().unwrap().layout.panes_with_kinds(),
+            vec![(terminal, PaneKind::Terminal), (other, PaneKind::Terminal)]
+        );
+    }
+    #[test]
+    fn file_pane_paths_are_validated_before_layout_changes() {
+        let mut state = Workspaces::default();
+        state.add_workspace("/a".into()).unwrap();
+        for path in ["", "/abs", "../up", "a/./b", "a//b", "C:\\temp", "a\0b"] {
+            assert!(state.open_file_pane(path).is_err(), "{path}");
+        }
+        assert_eq!(state.pane_count(), 1);
+        assert!(state.open_file_pane("ok.txt").is_ok());
     }
     #[test]
     fn switching_preserves_tabs_and_close_returns_only_owned_panes() {
@@ -423,6 +556,7 @@ mod tests {
             s.add_tab().unwrap();
         }
         assert!(s.add_tab().is_err());
+        assert!(s.open_file_pane("x").is_err());
         assert!(s.add_workspace("/b".into()).is_err());
         assert_eq!(s.items.len(), 1);
     }

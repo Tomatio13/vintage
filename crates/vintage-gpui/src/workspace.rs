@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 use vintage_core::{
     composition::Composition,
-    workspace::{Axis, Id, Layout, Workspaces},
+    workspace::{Axis, Id, Layout, PaneKind, Workspaces},
 };
 
 #[derive(Clone)]
@@ -22,6 +22,7 @@ pub struct WorkspaceView {
     _appearance_subscription: gpui::Subscription,
     model: Workspaces,
     terminals: BTreeMap<Id, Entity<TerminalView>>,
+    viewers: BTreeMap<Id, Entity<crate::files::FileViewer>>,
     sessions: Arc<NativeSessions>,
     shell: String,
     focus: FocusHandle,
@@ -178,6 +179,7 @@ impl WorkspaceView {
             _appearance_subscription: appearance_subscription,
             model: Workspaces::default(),
             terminals: BTreeMap::new(),
+            viewers: BTreeMap::new(),
             sessions,
             shell,
             focus: cx.focus_handle(),
@@ -203,59 +205,78 @@ impl WorkspaceView {
         view
     }
     fn synchronize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let panes: BTreeMap<Id, PathBuf> = self
+        let panes: BTreeMap<Id, (PaneKind, u64, PathBuf)> = self
             .model
             .items
             .iter()
             .flat_map(|w| {
-                w.tabs
-                    .iter()
-                    .flat_map(|t| t.layout.panes())
-                    .map(|id| (id, w.root.clone()))
+                w.tabs.iter().flat_map(|t| {
+                    t.layout
+                        .panes_with_kinds()
+                        .into_iter()
+                        .map(|(id, kind)| (id, (kind, w.id, w.root.clone())))
+                })
             })
             .collect();
         let removed: Vec<_> = self
             .terminals
             .keys()
+            .chain(self.viewers.keys())
             .filter(|id| !panes.contains_key(id))
             .copied()
             .collect();
         for id in removed {
-            self.terminals.remove(&id);
+            let terminal = self.terminals.remove(&id).is_some();
+            self.viewers.remove(&id);
             self.hook_activity.remove(&id);
             if self.block_notice == Some(id) {
                 self.block_notice = None;
             }
-            self.sessions.close(id);
-        }
-        for (id, root) in panes {
-            if let std::collections::btree_map::Entry::Vacant(vacant) = self.terminals.entry(id) {
-                let owner = self.sessions.start_with_scrollback(
-                    id,
-                    root,
-                    self.shell.clone(),
-                    cx.global::<crate::theme::Preferences>().0.scrollback,
-                );
-                let view = cx.new(|cx| {
-                    let mut view = TerminalView::new(owner, window, cx);
-                    view.shell_label = PathBuf::from(&self.shell)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    view
-                });
-                // Titles and bell markers live in this view, so repaint the
-                // workspace chrome when it changes.
-                cx.observe(&view, |_, _, cx| cx.notify()).detach();
-                vacant.insert(view);
+            // Viewer panes own no session; dropping their view revokes the
+            // file service through its release hook.
+            if terminal {
+                self.sessions.close(id);
             }
         }
-        self.synchronize_files(cx);
+        for (id, (kind, workspace, root)) in panes {
+            match kind {
+                PaneKind::Terminal => {
+                    if let std::collections::btree_map::Entry::Vacant(vacant) =
+                        self.terminals.entry(id)
+                    {
+                        let owner = self.sessions.start_with_scrollback(
+                            id,
+                            root,
+                            self.shell.clone(),
+                            cx.global::<crate::theme::Preferences>().0.scrollback,
+                        );
+                        let view = cx.new(|cx| {
+                            let mut view = TerminalView::new(owner, window, cx);
+                            view.shell_label = PathBuf::from(&self.shell)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned();
+                            view
+                        });
+                        // Titles and bell markers live in this view, so repaint the
+                        // workspace chrome when it changes.
+                        cx.observe(&view, |_, _, cx| cx.notify()).detach();
+                        vacant.insert(view);
+                    }
+                }
+                PaneKind::File { path } => {
+                    self.viewers.entry(id).or_insert_with(|| {
+                        cx.new(|cx| crate::files::FileViewer::new(workspace, root, path, cx))
+                    });
+                }
+            }
+        }
+        self.synchronize_files(window, cx);
         self.focus_active(window, cx);
         cx.notify();
     }
-    fn synchronize_files(&mut self, cx: &mut Context<Self>) {
+    fn synchronize_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let target = self
             .files_visible
             .then(|| self.model.current())
@@ -268,7 +289,16 @@ impl WorkspaceView {
             panel.update(cx, |panel, cx| panel.close(cx));
         }
         if let Some((id, root)) = target {
-            self.files_panel = Some((id, cx.new(|cx| crate::files::FilesPanel::new(id, root, cx))));
+            let panel = cx.new(|cx| crate::files::FilesPanel::new(id, root, cx));
+            cx.subscribe_in(
+                &panel,
+                window,
+                |view, _, event: &crate::files::OpenInPane, window, cx| {
+                    view.open_file_pane(event.0.clone(), window, cx);
+                },
+            )
+            .detach();
+            self.files_panel = Some((id, panel));
         }
     }
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -278,7 +308,7 @@ impl WorkspaceView {
     }
     fn toggle_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.files_visible = !self.files_visible;
-        self.synchronize_files(cx);
+        self.synchronize_files(window, cx);
         if !self.files_visible {
             self.focus_active(window, cx);
         }
@@ -299,15 +329,17 @@ impl WorkspaceView {
         }
     }
     fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(terminal) = self
-            .model
-            .tab()
-            .and_then(|t| self.terminals.get(&t.active_pane))
-        {
-            terminal.read(cx).focus.clone().focus(window, cx);
-        } else {
-            self.focus.focus(window, cx);
+        if let Some(pane) = self.model.tab().map(|t| t.active_pane) {
+            if let Some(viewer) = self.viewers.get(&pane) {
+                viewer.read(cx).focus.clone().focus(window, cx);
+                return;
+            }
+            if let Some(terminal) = self.terminals.get(&pane) {
+                terminal.read(cx).focus.clone().focus(window, cx);
+                return;
+            }
         }
+        self.focus.focus(window, cx);
     }
     fn start_rename(&mut self, id: Id, window: &mut Window, cx: &mut Context<Self>) {
         let Some(title) = self.model.current().and_then(|workspace| {
@@ -360,13 +392,22 @@ impl WorkspaceView {
     ) {
         self.model.activate(workspace, tab);
         self.error = None;
-        self.synchronize_files(cx);
+        self.synchronize_files(window, cx);
         self.focus_active(window, cx);
         cx.notify();
     }
     fn close_pane(&mut self, id: Id, window: &mut Window, cx: &mut Context<Self>) {
         self.model.close_pane(id);
         self.error = None;
+        self.synchronize(window, cx);
+    }
+    /// Open a file from the Files panel as a viewer pane in the active tab.
+    fn open_file_pane(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.error = self.model.open_file_pane(&path).err().map(str::to_owned);
+        if self.error.is_some() {
+            cx.notify();
+            return;
+        }
         self.synchronize(window, cx);
     }
     fn close_tab(&mut self, id: Id, window: &mut Window, cx: &mut Context<Self>) {
@@ -384,7 +425,7 @@ impl WorkspaceView {
         if let Some((workspace, tab)) = self.model.pane_location(pane) {
             self.model.activate(workspace, Some(tab));
             self.model.focus(pane);
-            self.synchronize_files(cx);
+            self.synchronize_files(window, cx);
             self.focus_active(window, cx);
         }
         cx.notify();
@@ -448,7 +489,7 @@ impl WorkspaceView {
     }
     fn navigate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.model.navigate(index);
-        self.synchronize_files(cx);
+        self.synchronize_files(window, cx);
         self.focus_active(window, cx);
         cx.notify();
     }
@@ -569,18 +610,22 @@ impl WorkspaceView {
             .0
             .hook_notifications;
         match layout {
-            Layout::Pane(id) => {
+            Layout::Pane { id, kind } => {
                 let id = *id;
                 let active = self.model.tab().is_some_and(|t| t.active_pane == id);
-                let terminal = self.terminals.get(&id).expect("pane has a view").clone();
-                let activity = self.hook_activity.get(&id).map(String::as_str);
-                let activity = if !notifications_enabled && activity == Some("blocked") {
-                    None
-                } else {
-                    activity
+                let activity = match kind {
+                    PaneKind::Terminal => {
+                        let activity = self.hook_activity.get(&id).map(String::as_str);
+                        if !notifications_enabled && activity == Some("blocked") {
+                            None
+                        } else {
+                            activity
+                        }
+                    }
+                    PaneKind::File { .. } => None,
                 };
                 let blocked = activity == Some("blocked");
-                div()
+                let pane = div()
                     .id(("pane", id))
                     .flex_1()
                     .min_w_0()
@@ -605,61 +650,85 @@ impl WorkspaceView {
                             view.focus_active(window, cx);
                             cx.notify();
                         }),
-                    )
-                    .child(
-                        div()
-                            .h(gpui::rems(1.875))
+                    );
+                let header = |title: gpui::AnyElement,
+                              marker: Option<gpui::AnyElement>,
+                              blocked,
+                              id,
+                              cx: &mut Context<Self>| {
+                    div()
+                        .h(gpui::rems(1.875))
+                        .flex_none()
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .bg(rgb(if blocked { 0x3b2922 } else { 0x201f1c }))
+                        .child(title)
+                        .children(marker)
+                        .child(
+                            button(("close-pane", id), "×")
+                                .flex_none()
+                                .ml_2()
+                                .border_1()
+                                .border_color(rgb(0x39352e))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |view, _, window, cx| {
+                                    cx.stop_propagation();
+                                    view.close_pane(id, window, cx);
+                                })),
+                        )
+                };
+                match kind {
+                    PaneKind::Terminal => {
+                        let terminal = self.terminals.get(&id).expect("pane has a view").clone();
+                        let title = div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_size(gpui::rems(0.75))
+                            .text_color(rgb(if active { 0xe6e1d8 } else { 0xbab1a1 }))
+                            .child(format!("Terminal · {}", terminal.read(cx).header_title()));
+                        let marker = div()
                             .flex_none()
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .bg(rgb(if blocked { 0x3b2922 } else { 0x201f1c }))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .text_size(gpui::rems(0.75))
-                                    .text_color(rgb(if active { 0xe6e1d8 } else { 0xbab1a1 }))
-                                    .child(format!(
-                                        "Terminal · {}",
-                                        terminal.read(cx).header_title()
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .mr_2()
-                                    .text_size(gpui::rems(0.75))
-                                    .text_color(rgb(if terminal.read(cx).needs_attention {
-                                        0xe8aa82
-                                    } else {
-                                        Self::activity_color(activity)
-                                    }))
-                                    .child(if terminal.read(cx).needs_attention {
-                                        "!"
-                                    } else {
-                                        Self::activity_mark(activity)
-                                    }),
-                            )
-                            .child(
-                                button(("close-pane", id), "×")
-                                    .flex_none()
-                                    .ml_2()
-                                    .border_1()
-                                    .border_color(rgb(0x39352e))
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation()
-                                    })
-                                    .on_click(cx.listener(move |view, _, window, cx| {
-                                        cx.stop_propagation();
-                                        view.close_pane(id, window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(div().flex_1().min_h_0().min_w_0().child(terminal))
-                    .into_any_element()
+                            .mr_2()
+                            .text_size(gpui::rems(0.75))
+                            .text_color(rgb(if terminal.read(cx).needs_attention {
+                                0xe8aa82
+                            } else {
+                                Self::activity_color(activity)
+                            }))
+                            .child(if terminal.read(cx).needs_attention {
+                                "!"
+                            } else {
+                                Self::activity_mark(activity)
+                            })
+                            .into_any_element();
+                        pane.child(header(
+                            title.into_any_element(),
+                            Some(marker),
+                            blocked,
+                            id,
+                            cx,
+                        ))
+                        .child(div().flex_1().min_h_0().min_w_0().child(terminal))
+                        .into_any_element()
+                    }
+                    PaneKind::File { path } => {
+                        let viewer = self.viewers.get(&id).expect("pane has a view").clone();
+                        let name = path.rsplit('/').next().unwrap_or(path.as_str());
+                        let title = div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_size(gpui::rems(0.75))
+                            .text_color(rgb(if active { 0xe6e1d8 } else { 0xbab1a1 }))
+                            .child(format!("File · {name}"));
+                        pane.child(header(title.into_any_element(), None, blocked, id, cx))
+                            .child(div().flex_1().min_h_0().min_w_0().child(viewer))
+                            .into_any_element()
+                    }
+                }
             }
             Layout::Split {
                 axis,
