@@ -1489,7 +1489,7 @@ fn main() -> anyhow::Result<()> {
                 exit_after = Some(seconds);
             }
             "--help" => {
-                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane\nCtrl+comma: settings; Ctrl+Shift+F: files; drag window edges to resize");
+                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane\nCtrl+comma: settings; Ctrl+Shift+F: files; Ctrl+Shift+S: search; drag window edges to resize");
                 return Ok(());
             }
             "--list-shells" => {
