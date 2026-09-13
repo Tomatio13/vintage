@@ -941,6 +941,10 @@ impl Render for WorkspaceView {
                                         let entity = cx.entity().clone();
                                         let focus = self.rename_focus.clone();
                                         input
+                                            // Join the key dispatch tree so
+                                            // Enter/Escape reach the workspace
+                                            // key handler during rename.
+                                            .track_focus(&focus)
                                             .px_1()
                                             .bg(rgb(0x191816))
                                             .border_1()

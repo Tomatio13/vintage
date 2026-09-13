@@ -86,7 +86,7 @@ impl Binding {
 pub fn default_bindings() -> [Binding; 10] {
     std::array::from_fn(|i| Binding {
         key: [
-            "left", "right", "up", "down", "left", "right", "n", "d", "t", "s",
+            "left", "right", "up", "down", "left", "right", "n", "d", "t", "g",
         ][i]
             .into(),
         ctrl: i != 4 && i != 5,
@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(settings.bindings[6].label(), "Ctrl+Shift+n");
         assert_eq!(settings.bindings[7].label(), "Ctrl+Shift+d");
         assert_eq!(settings.bindings[8].label(), "Ctrl+Shift+t");
-        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+s");
+        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+g");
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -391,7 +391,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(&store.path, serde_json::to_vec(&value).unwrap()).unwrap();
         let settings = store.load().unwrap();
-        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+s");
+        assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+g");
         settings.validate().unwrap();
         fs::remove_dir_all(root).unwrap();
     }

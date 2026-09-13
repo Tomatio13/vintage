@@ -1377,6 +1377,9 @@ impl Render for TerminalView {
                         .overflow_hidden()
                         .text_size(gpui::rems(0.75))
                         .text_color(palette.color(0xe6e1d8))
+                        // Join the key dispatch tree so Enter/Escape reach the
+                        // terminal's key handler while the input is focused.
+                        .track_focus(&search.focus)
                         .child(text)
                         .child(
                             gpui::canvas(
@@ -1489,7 +1492,7 @@ fn main() -> anyhow::Result<()> {
                 exit_after = Some(seconds);
             }
             "--help" => {
-                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane\nCtrl+comma: settings; Ctrl+Shift+F: files; Ctrl+Shift+S: search; drag window edges to resize");
+                println!("VINTAGE GPUI Preview\nUsage: vintage-gpui [--cwd PATH] [--shell ID_OR_PATH] [--settings PATH] [--exit-after SECONDS]\n--exit-after: bounded startup/shutdown smoke test\nCtrl+Shift+C/V: copy/paste; Ctrl+plus/minus/0: font size; Shift+PageUp/PageDown: scroll\nCtrl+Shift+O: workspace; Ctrl+Shift+N: tab; Ctrl+Shift+D: split right; Ctrl+Shift+T: split down; Ctrl+Shift+W: close pane\nCtrl+comma: settings; Ctrl+Shift+F: files; Ctrl+Shift+G: search; drag window edges to resize");
                 return Ok(());
             }
             "--list-shells" => {
