@@ -17,7 +17,7 @@ pub const FONT_PRESETS: [&str; 6] = [
     "JetBrainsMono Nerd Font",
     "Custom",
 ];
-pub const ACTIONS: [&str; 10] = [
+pub const ACTIONS: [&str; 12] = [
     "Previous tab",
     "Next tab",
     "Previous pane",
@@ -28,6 +28,8 @@ pub const ACTIONS: [&str; 10] = [
     "Split right",
     "Split down",
     "Search in terminal",
+    "Toggle sidebar",
+    "Close pane",
 ];
 
 fn default_hook_notifications() -> bool {
@@ -75,23 +77,23 @@ impl Binding {
         ensure!(
             !(self.ctrl
                 && !self.alt
-                && ((self.shift
-                    && matches!(self.key.as_str(), "f" | "o" | "w" | "tab" | "c" | "v"))
+                && ((self.shift && matches!(self.key.as_str(), "f" | "o" | "tab" | "c" | "v"))
                     || matches!(self.key.as_str(), "," | "+" | "=" | "-" | "0"))),
             "This shortcut is reserved by VINTAGE"
         );
         Ok(())
     }
 }
-pub fn default_bindings() -> [Binding; 10] {
+pub fn default_bindings() -> [Binding; 12] {
     std::array::from_fn(|i| Binding {
         key: [
-            "left", "right", "up", "down", "left", "right", "n", "d", "t", "g",
+            "left", "right", "up", "down", "left", "right", "n", "d", "t", "g", "b", "w",
         ][i]
             .into(),
-        ctrl: i != 4 && i != 5,
-        alt: i == 4 || i == 5,
-        shift: true,
+        ctrl: !matches!(i, 4 | 5),
+        alt: matches!(i, 4 | 5),
+        // The sidebar toggle does not use Shift.
+        shift: !matches!(i, 4 | 5 | 10),
     })
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,7 +107,7 @@ pub struct Settings {
     pub font_size: u16,
     pub scrollback: usize,
     pub shell: String,
-    pub bindings: [Binding; 10],
+    pub bindings: [Binding; 12],
     #[serde(default = "default_hook_notifications")]
     pub hook_notifications: bool,
 }
@@ -259,6 +261,15 @@ impl SettingsStore {
                 // Settings saved before the search shortcut existed.
                 bindings.push(serde_json::json!(defaults[9]));
             }
+            if bindings.len() == 10 {
+                // Settings saved before the sidebar and close-pane shortcuts
+                // became configurable.
+                bindings.extend(
+                    defaults[10..]
+                        .iter()
+                        .map(|binding| serde_json::json!(binding)),
+                );
+            }
         }
         let settings: Settings = serde_json::from_value(value)
             .context("Preview settings are damaged; defaults are active until you save")?;
@@ -394,6 +405,49 @@ mod tests {
         assert_eq!(settings.bindings[9].label(), "Ctrl+Shift+g");
         settings.validate().unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn ten_binding_settings_migrate_with_sidebar_and_close_pane_actions() {
+        let root =
+            std::env::temp_dir().join(format!("vintage-settings-panes-{}", std::process::id()));
+        let store = SettingsStore::new(root.join("settings.json"));
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["bindings"].as_array_mut().unwrap().truncate(10);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&store.path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let settings = store.load().unwrap();
+        assert_eq!(settings.bindings[10].label(), "Ctrl+b");
+        assert_eq!(settings.bindings[11].label(), "Ctrl+Shift+w");
+        settings.validate().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn close_pane_shortcut_is_rebindable() {
+        let mut s = Settings::default();
+        s.rebind(
+            11,
+            Binding {
+                key: "x".into(),
+                ctrl: true,
+                alt: false,
+                shift: true,
+            },
+        )
+        .unwrap();
+        s.validate().unwrap();
+        // The old default is no longer reserved, so Ctrl+Shift+W stays free for
+        // a rebind as well.
+        s.rebind(
+            9,
+            Binding {
+                key: "w".into(),
+                ctrl: true,
+                alt: false,
+                shift: true,
+            },
+        )
+        .unwrap();
+        s.validate().unwrap();
     }
     #[test]
     fn missing_hook_notification_preference_defaults_to_enabled() {

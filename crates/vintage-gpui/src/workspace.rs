@@ -466,16 +466,6 @@ impl WorkspaceView {
             cx.stop_propagation();
             return;
         }
-        if modifiers.control
-            && !modifiers.alt
-            && !modifiers.shift
-            && !modifiers.platform
-            && event.keystroke.key.eq_ignore_ascii_case("b")
-        {
-            self.toggle_sidebar(window, cx);
-            cx.stop_propagation();
-            return;
-        }
         if modifiers.control && !modifiers.alt && !modifiers.platform && event.keystroke.key == ","
         {
             self.toggle_settings(window, cx);
@@ -508,6 +498,12 @@ impl WorkspaceView {
                             }
                         }
                     }
+                    10 => self.toggle_sidebar(window, cx),
+                    11 => {
+                        if let Some(pane) = self.model.tab().map(|tab| tab.active_pane) {
+                            self.close_pane(pane, window, cx);
+                        }
+                    }
                     _ => unreachable!("settings validation limits shortcut actions"),
                 }
                 cx.stop_propagation();
@@ -521,11 +517,6 @@ impl WorkspaceView {
             "f" => self.toggle_files(window, cx),
 
             "o" => self.open_workspace(window, cx),
-            "w" => {
-                if let Some(pane) = self.model.tab().map(|t| t.active_pane) {
-                    self.close_pane(pane, window, cx);
-                }
-            }
             "tab" => {
                 if let Some(w) = self.model.current() {
                     if let Some(i) = w.tabs.iter().position(|t| Some(t.id) == w.active_tab) {
